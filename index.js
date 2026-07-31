@@ -1,34 +1,32 @@
-import { extension_settings, getContext } from "../../../extensions.js";
-import { event_types, eventSource } from "../../../../script.js";
+// The Riparian Gaze - debug test version
+(function () {
+    var debugDiv = document.createElement('div');
+    debugDiv.id = 'tlg-debug';
+    debugDiv.style.cssText = 'position:fixed;bottom:10px;right:10px;z-index:99999;background:#c00;color:#fff;padding:10px 14px;font-size:13px;border-radius:4px;';
+    debugDiv.textContent = 'SCRIPT LOADED';
+    document.body.appendChild(debugDiv);
 
-const extensionName = "The-Riparian-Gaze";
-const MODULE_NAME = "the-riparian-gaze";
-
-console.log(`[${MODULE_NAME}] 脚本开始加载`);
-
-function addButton() {
-    const menu = document.getElementById('extensionsMenu');
-    if (!menu) return false;
-    if (document.getElementById('tl-memory-button')) return true;
-
-    const btn = document.createElement('div');
-    btn.id = 'tl-memory-button';
-    btn.className = 'list-group-item flex-container flexGap5 interactable';
-    btn.title = '时间线记忆管理';
-    btn.innerHTML = '<i class="fa-solid fa-code-branch"></i><span>时间线</span>';
-    btn.addEventListener('click', function() {
-        alert('按钮生效！');
-    });
-    menu.appendChild(btn);
-    console.log(`[${MODULE_NAME}] 按钮注入成功`);
-    return true;
-}
-
-// 等待酒馆UI就绪后注入
-eventSource.on(event_types.APP_READY, function() {
-    console.log(`[${MODULE_NAME}] APP_READY 事件触发`);
-    const success = addButton();
-    if (!success) {
-        setTimeout(addButton, 2000);
-    }
-});
+    var tries = 0;
+    var timer = setInterval(function () {
+        tries++;
+        var menu = document.getElementById('extensionsMenu');
+        if (tries === 1) {
+            debugDiv.textContent = 'tick ' + tries + ' menu=' + (menu ? 'FOUND' : 'missing');
+        }
+        if (menu && !document.getElementById('tl-memory-button')) {
+            var btn = document.createElement('div');
+            btn.id = 'tl-memory-button';
+            btn.className = 'list-group-item flex-container flexGap5 interactable';
+            btn.innerHTML = '<i class="fa-solid fa-code-branch"></i><span>Timeline</span>';
+            btn.addEventListener('click', function () { alert('OK'); });
+            menu.appendChild(btn);
+            debugDiv.textContent = 'BUTTON ADDED';
+            clearInterval(timer);
+            return;
+        }
+        if (tries > 30) {
+            debugDiv.textContent = 'TIMEOUT';
+            clearInterval(timer);
+        }
+    }, 1000);
+})();
