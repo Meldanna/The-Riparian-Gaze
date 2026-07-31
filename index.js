@@ -1,7 +1,5 @@
-import { extension_settings, getContext } from "../../../extensions.js";
-
-jQuery(async () => {
-    const MAX_WAIT = 20;
+(async function () {
+    const MAX_WAIT = 30;
     let count = 0;
     const timer = setInterval(() => {
         const menu = document.getElementById('extensionsMenu');
@@ -12,10 +10,10 @@ jQuery(async () => {
             btn.className = 'list-group-item flex-container flexGap5 interactable';
             btn.title = '时间线记忆管理';
             btn.innerHTML = '<i class="fa-solid fa-code-branch"></i><span>时间线</span>';
-            btn.addEventListener('click', () => alert('按钮生效！'));
+            btn.addEventListener('click', function() { alert('按钮生效！'); });
             menu.appendChild(btn);
             clearInterval(timer);
         }
         if (count >= MAX_WAIT) clearInterval(timer);
     }, 1000);
-});
+})();
