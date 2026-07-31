@@ -2,11 +2,11 @@
   "display_name": "河岸凝视",
   "loading_order": 100,
   "requires": [],
-  "optional": ["MagVarUpdate"],
+  "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "Meldanna",
-  "version": "0.1.0",
-  "homePage": "https://github.com/Meldanna/st-timeline-memory",
+  "version": "0.2.0",
+  "homePage": "https://github.com/Meldanna/The-Riparian-Gaze",
   "auto_update": true
 }
