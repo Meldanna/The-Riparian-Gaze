@@ -7,5 +7,6 @@
     "css": "style.css",
     "author": "Meldanna",
     "version": "0.3.0",
+    "auto_update": true
     "homePage": "https://github.com/Meldanna/The-Riparian-Gaze"
 }
