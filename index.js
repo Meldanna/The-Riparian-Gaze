@@ -79,8 +79,8 @@
         const rootId = generateId();
         state.nodes = [{
             id: rootId,
-            name: "起源点",
-            brief: "时间线起源。",
+            name: "Origin",
+            brief: "Timeline origin point.",
             parentId: null,
             msgIdx: 0,
             statData: null,
@@ -226,7 +226,7 @@
 
         const newNode = {
             id: newId,
-            name: name || `节点 ${state.nodes.length}`,
+            name: name || `Node ${state.nodes.length}`,
             brief: brief || "",
             parentId: parentId,
             msgIdx: msgIdx,
@@ -245,7 +245,7 @@
         state.selectedNodeId = newId;
         state.turnsSinceAnchor = 0;
         saveToMetadata();
-        toast(`⚓ 已锚定: ${newNode.name}`);
+        toast(`⚓ Anchored: ${newNode.name}`);
         renderCanvas();
         refreshArchive();
         return newId;
@@ -256,7 +256,7 @@
     // ─────────────────────────────────────────────
     function jumpToNode(nodeId) {
         const node = findNode(nodeId);
-        if (!node) { toast("节点不存在。"); return; }
+        if (!node) { toast("Node not found."); return; }
 
         // 1. Restore MVU variables
         if (node.statData != null) {
@@ -271,7 +271,7 @@
         state.turnsSinceAnchor = 0;
         saveToMetadata();
 
-        toast(`↩ 已跳转至: ${node.name}`);
+        toast(`↩ Jumped to: ${node.name}`);
         renderCanvas();
         refreshArchive();
         closeBriefPanel();
@@ -289,18 +289,18 @@
         backdrop.id = "tlg-anchor-modal";
         backdrop.innerHTML = `
             <div class="tlg-modal">
-                <div class="tlg-modal-title">⚓ 创建锚定点</div>
+                <div class="tlg-modal-title">⚓ Create Anchor Point</div>
                 <div style="margin-bottom:12px">
-                    <label class="tlg-label">节点名称</label>
-                    <input class="tlg-input" id="tlg-anc-name" placeholder="例：决斗之前…" value="${prefillName || ""}" />
+                    <label class="tlg-label">Node Name</label>
+                    <input class="tlg-input" id="tlg-anc-name" placeholder="e.g. Before the duel…" value="${prefillName || ""}" />
                 </div>
                 <div>
-                    <label class="tlg-label">简要描述</label>
-                    <textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea>
+                    <label class="tlg-label">Brief Description</label>
+                    <textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="What is the situation at this point…"></textarea>
                 </div>
                 <div class="tlg-modal-actions">
-                    <button class="tlg-btn" id="tlg-anc-cancel">取消</button>
-                    <button class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">⚓ 确认锚定</button>
+                    <button class="tlg-btn" id="tlg-anc-cancel">Cancel</button>
+                    <button class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">⚓ Confirm Anchor</button>
                 </div>
             </div>
         `;
@@ -311,7 +311,7 @@
 
         backdrop.querySelector("#tlg-anc-cancel").onclick = () => backdrop.remove();
         backdrop.querySelector("#tlg-anc-ok").onclick = () => {
-            const name = nameInput.value.trim() || `节点 ${state.nodes.length}`;
+            const name = nameInput.value.trim() || `Node ${state.nodes.length}`;
             const brief = briefInput.value.trim();
             createAnchor(name, brief);
             backdrop.remove();
@@ -525,27 +525,27 @@
                 ${new Date(node.timestamp).toLocaleString()}
             </div>
             <div style="margin-bottom:8px;font-size:11px;color:var(--tlg-silver-dim)">
-                消息索引: ${node.msgIdx} &nbsp;|&nbsp; 
-                ${node.statData ? "MVU快照 ✓" : "无MVU快照"}
+                Msg index: ${node.msgIdx} &nbsp;|&nbsp; 
+                ${node.statData ? "MVU snapshot ✓" : "No MVU snapshot"}
             </div>
-            <div class="tlg-brief-text" style="white-space:pre-wrap;word-break:break-word">${node.brief || "<em style='color:var(--tlg-silver-dim)'>暂无描述。</em>"}</div>
+            <div class="tlg-brief-text" style="white-space:pre-wrap;word-break:break-word">${node.brief || "<em style='color:var(--tlg-silver-dim)'>No description.</em>"}</div>
             <div style="margin-top:12px">
-                <label class="tlg-label">编辑描述</label>
+                <label class="tlg-label">Edit brief</label>
                 <textarea class="tlg-textarea" id="tlg-brief-edit" style="min-height:100px">${node.brief || ""}</textarea>
-                <button class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%">保存描述</button>
+                <button class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%">Save Description</button>
             </div>
         `;
 
         body.querySelector("#tlg-brief-save").onclick = () => {
             node.brief = body.querySelector("#tlg-brief-edit").value;
             saveToMetadata();
-            toast("描述已保存。");
+            toast("Description saved.");
             refreshArchive();
         };
 
         const footer = panel.querySelector(".tlg-brief-footer");
         footer.innerHTML = `
-            <button class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此节点</button>
+            <button class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ Confirm Jump to This Node</button>
         `;
         footer.querySelector("#tlg-brief-jump").onclick = () => jumpToNode(nodeId);
 
@@ -568,7 +568,7 @@
         if (!container) return;
 
         if (state.nodes.length === 0) {
-            container.innerHTML = `<div style="color:var(--tlg-silver-dim);padding:20px">暂无节点。</div>`;
+            container.innerHTML = `<div style="color:var(--tlg-silver-dim);padding:20px">No nodes yet.</div>`;
             return;
         }
 
@@ -577,12 +577,12 @@
             const isCurrent = node.id === state.currentNodeId;
             return `
                 <div class="tlg-archive-card ${isCurrent ? "current" : ""}" data-nid="${node.id}">
-                    <div class="tlg-archive-title">${escHtml(node.name)}${isCurrent ? " <span style='color:var(--tlg-silver-dim);font-size:11px'>(当前)</span>" : ""}</div>
-                    <div class="tlg-archive-meta">${new Date(node.timestamp).toLocaleString()} &nbsp;·&nbsp; 消息 ${node.msgIdx}</div>
+                    <div class="tlg-archive-title">${escHtml(node.name)}${isCurrent ? " <span style='color:var(--tlg-silver-dim);font-size:11px'>(current)</span>" : ""}</div>
+                    <div class="tlg-archive-meta">${new Date(node.timestamp).toLocaleString()} &nbsp;·&nbsp; Msg ${node.msgIdx}</div>
                     <div class="tlg-archive-brief">${escHtml(node.brief || "")}</div>
                     <div style="margin-top:10px;display:flex;gap:8px">
-                        <button class="tlg-btn tlg-archive-view" data-nid="${node.id}">在树图中查看</button>
-                        <button class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="${node.id}">↩ 跳转至此</button>
+                        <button class="tlg-btn tlg-archive-view" data-nid="${node.id}">View in Tree</button>
+                        <button class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="${node.id}">↩ Jump Here</button>
                         <button class="tlg-btn tlg-btn-danger tlg-archive-del" data-nid="${node.id}" style="margin-left:auto">✕</button>
                     </div>
                 </div>
@@ -602,8 +602,8 @@
         container.querySelectorAll(".tlg-archive-del").forEach(btn => {
             btn.onclick = () => {
                 const nid = btn.dataset.nid;
-                if (nid === state.currentNodeId) { toast("无法删除当前所在节点。"); return; }
-                if (!confirm(`确定删除节点「${findNode(nid)?.name}」？`)) return;
+                if (nid === state.currentNodeId) { toast("Cannot delete current node."); return; }
+                if (!confirm(`Delete node "${findNode(nid)?.name}"?`)) return;
                 deleteNode(nid);
             };
         });
@@ -627,7 +627,7 @@
         saveToMetadata();
         renderCanvas();
         refreshArchive();
-        toast("节点已删除。");
+        toast("Node deleted.");
     }
 
     // ─────────────────────────────────────────────
@@ -637,14 +637,14 @@
         const list = document.getElementById("tlg-summary-list");
         if (!list) return;
         if (state.summaries.length === 0) {
-            list.innerHTML = `<div style="color:var(--tlg-silver-dim)">暂无总结记录。</div>`;
+            list.innerHTML = `<div style="color:var(--tlg-silver-dim)">No summaries yet.</div>`;
             return;
         }
         list.innerHTML = state.summaries.slice().reverse().map((s, i) => `
             <div class="tlg-section" style="margin-bottom:10px">
                 <div style="font-size:11px;color:var(--tlg-silver-dim);margin-bottom:6px">${new Date(s.timestamp).toLocaleString()}</div>
                 <div style="font-size:13px;white-space:pre-wrap">${escHtml(s.text)}</div>
-                <button class="tlg-btn tlg-btn-danger" style="margin-top:8px;font-size:11px" data-idx="${state.summaries.length - 1 - i}">删除</button>
+                <button class="tlg-btn tlg-btn-danger" style="margin-top:8px;font-size:11px" data-idx="${state.summaries.length - 1 - i}">Delete</button>
             </div>
         `).join("");
         list.querySelectorAll("[data-idx]").forEach(btn => {
@@ -660,7 +660,7 @@
         const apiUrl = (state.settings.apiUrl || "").trim();
         const apiKey = (state.settings.apiKey || "").trim();
         const model = (state.settings.model || "").trim();
-        if (!apiUrl) { toast("请先在引擎标签页设置 API 地址。"); return; }
+        if (!apiUrl) { toast("Please set API URL in Engine tab."); return; }
 
         const st = getST();
         const recentChat = (st?.chat || []).slice(-20).map(m => `${m.name || m.role}: ${m.mes}`).join("\n");
@@ -668,7 +668,7 @@
 
         const btn = document.getElementById("tlg-summary-run");
         if (btn) btn.disabled = true;
-        toast("正在生成总结…");
+        toast("Generating summary…");
 
         try {
             const endpoint = buildEndpoint(apiUrl, "/chat/completions");
@@ -686,14 +686,13 @@
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            const text = data.choices?
             const text = data.choices?.[0]?.message?.content || "";
             state.summaries.push({ timestamp: Date.now(), text });
             saveToMetadata();
             refreshSummary();
-            toast("总结已生成。");
+            toast("Summary generated.");
         } catch (e) {
-            toast("总结失败: " + e.message);
+            toast("Summary failed: " + e.message);
             console.error("[TLG] Summary error:", e);
         } finally {
             if (btn) btn.disabled = false;
@@ -714,11 +713,11 @@
     async function fetchModelList() {
         const apiUrl = (state.settings.apiUrl || "").trim();
         const apiKey = (state.settings.apiKey || "").trim();
-        if (!apiUrl) { toast("请先设置 API 地址。"); return; }
+        if (!apiUrl) { toast("Please set API URL first."); return; }
 
         const btn = document.getElementById("tlg-fetch-models");
         if (btn) btn.disabled = true;
-        toast("正在拉取模型列表…");
+        toast("Fetching models…");
 
         try {
             const endpoint = buildEndpoint(apiUrl, "/models");
@@ -731,9 +730,9 @@
             state.settings.modelList = models.filter(Boolean);
             saveToMetadata();
             populateModelSelect();
-            toast(`已加载 ${models.length} 个模型。`);
+            toast(`Loaded ${models.length} model(s).`);
         } catch (e) {
-            toast("拉取模型失败: " + e.message);
+            toast("Failed to fetch models: " + e.message);
             console.error("[TLG] fetchModelList:", e);
         } finally {
             if (btn) btn.disabled = false;
@@ -744,7 +743,7 @@
         const sel = document.getElementById("tlg-model-select");
         if (!sel) return;
         const list = state.settings.modelList || [];
-        sel.innerHTML = `<option value="">-- 选择模型 --</option>` +
+        sel.innerHTML = `<option value="">-- select model --</option>` +
             list.map(m => `<option value="${escHtml(m)}" ${m === state.settings.model ? "selected" : ""}>${escHtml(m)}</option>`).join("");
         if (state.settings.model && !list.includes(state.settings.model)) {
             sel.innerHTML += `<option value="${escHtml(state.settings.model)}" selected>${escHtml(state.settings.model)}</option>`;
@@ -763,10 +762,10 @@
         overlay.innerHTML = `
             <!-- Tab bar -->
             <div class="tlg-tab-bar">
-                <div class="tlg-tab active" data-tab="tree"><span class="tlg-tab-icon">🌿</span>因果树</div>
-                <div class="tlg-tab" data-tab="archive"><span class="tlg-tab-icon">📁</span>档案库</div>
-                <div class="tlg-tab" data-tab="summary"><span class="tlg-tab-icon">📝</span>总结池</div>
-                <div class="tlg-tab" data-tab="engine"><span class="tlg-tab-icon">⚙️</span>引擎设置</div>
+                <div class="tlg-tab active" data-tab="tree"><span class="tlg-tab-icon">🌿</span>Tree View</div>
+                <div class="tlg-tab" data-tab="archive"><span class="tlg-tab-icon">📁</span>Archive</div>
+                <div class="tlg-tab" data-tab="summary"><span class="tlg-tab-icon">📝</span>Summary Pool</div>
+                <div class="tlg-tab" data-tab="engine"><span class="tlg-tab-icon">⚙️</span>Engine</div>
                 <div class="tlg-close-btn" id="tlg-close">✕</div>
             </div>
 
@@ -778,13 +777,13 @@
                     <div id="tlg-canvas-wrap">
                         <canvas id="tlg-tree-canvas"></canvas>
                         <div id="tlg-canvas-toolbar">
-                            <button class="tlg-btn" id="tlg-canvas-anchor">⚓ 在此锚定</button>
-                            <button class="tlg-btn" id="tlg-canvas-reset-view">重置视图</button>
+                            <button class="tlg-btn" id="tlg-canvas-anchor">⚓ Anchor Here</button>
+                            <button class="tlg-btn" id="tlg-canvas-reset-view">Reset View</button>
                         </div>
                     </div>
                     <div id="tlg-brief-panel">
                         <div class="tlg-brief-header">
-                            <span>节点</span>
+                            <span>Node</span>
                             <button class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px">✕</button>
                         </div>
                         <div class="tlg-brief-body"></div>
@@ -796,8 +795,8 @@
                 <div class="tlg-panel" id="tlg-panel-archive">
                     <div class="tlg-archive-panel" style="width:100%">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                            <div style="font-size:15px;font-weight:600;color:var(--tlg-silver-bright)">全部节点</div>
-                            <button class="tlg-btn tlg-btn-primary" id="tlg-archive-new">⚓ 新建锚定</button>
+                            <div style="font-size:15px;font-weight:600;color:var(--tlg-silver-bright)">All Nodes</div>
+                            <button class="tlg-btn tlg-btn-primary" id="tlg-archive-new">⚓ New Anchor</button>
                         </div>
                         <div id="tlg-archive-list"></div>
                     </div>
@@ -807,26 +806,26 @@
                 <div class="tlg-panel" id="tlg-panel-summary">
                     <div class="tlg-summary-panel" style="width:100%">
                         <div class="tlg-section">
-                            <div class="tlg-section-title">自动总结模式</div>
+                            <div class="tlg-section-title">Auto Summary Mode</div>
                             <div class="tlg-row">
-                                <span class="tlg-label" style="margin:0">自动模式</span>
+                                <span class="tlg-label" style="margin:0">Auto mode</span>
                                 <div class="tlg-toggle ${state.settings.autoMode ? "on" : ""}" id="tlg-auto-toggle"></div>
                             </div>
                             <div class="tlg-row" style="margin-top:8px">
-                                <label class="tlg-label" style="margin:0;flex:1">每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" max="100" value="${state.settings.autoInterval}" style="width:60px;display:inline-block;padding:4px 8px;margin:0 6px"> 轮提醒</label>
+                                <label class="tlg-label" style="margin:0;flex:1">Remind every <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" max="100" value="${state.settings.autoInterval}" style="width:60px;display:inline-block;padding:4px 8px;margin:0 6px"> turns</label>
                             </div>
                             <div class="tlg-row" style="margin-top:8px">
-                                <label class="tlg-label" style="margin:0;flex:1">跳转后显示最后 <input class="tlg-input" id="tlg-last-n" type="number" min="1" max="100" value="${state.settings.lastNMessages}" style="width:60px;display:inline-block;padding:4px 8px;margin:0 6px"> 条消息</label>
+                                <label class="tlg-label" style="margin:0;flex:1">Show last <input class="tlg-input" id="tlg-last-n" type="number" min="1" max="100" value="${state.settings.lastNMessages}" style="width:60px;display:inline-block;padding:4px 8px;margin:0 6px"> messages after jump</label>
                             </div>
                         </div>
                         <div class="tlg-section">
-                            <div class="tlg-section-title">总结提示词</div>
-                            <label class="tlg-label">提示词模板（用 {{context}} 代入聊天记录）</label>
+                            <div class="tlg-section-title">Summary Prompt</div>
+                            <label class="tlg-label">Prompt template (use {{context}} for chat history)</label>
                             <textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">${escHtml(state.settings.summaryPrompt)}</textarea>
-                            <button class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px">▶ 立即生成总结</button>
+                            <button class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px">▶ Generate Summary Now</button>
                         </div>
                         <div class="tlg-section">
-                            <div class="tlg-section-title">总结历史</div>
+                            <div class="tlg-section-title">Summary History</div>
                             <div id="tlg-summary-list"></div>
                         </div>
                     </div>
@@ -836,32 +835,32 @@
                 <div class="tlg-panel" id="tlg-panel-engine">
                     <div class="tlg-engine-panel" style="width:100%">
                         <div class="tlg-section">
-                            <div class="tlg-section-title">API 配置</div>
-                            <label class="tlg-label">API 基础地址</label>
+                            <div class="tlg-section-title">API Configuration</div>
+                            <label class="tlg-label">API Base URL</label>
                             <div class="tlg-row">
                                 <input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="${escHtml(state.settings.apiUrl)}" />
-                                <button class="tlg-btn" id="tlg-test-api">测试</button>
+                                <button class="tlg-btn" id="tlg-test-api">Test</button>
                             </div>
-                            <label class="tlg-label">API 密钥</label>
+                            <label class="tlg-label">API Key</label>
                             <input class="tlg-input" id="tlg-api-key" type="password" placeholder="sk-…" value="${escHtml(state.settings.apiKey)}" style="margin-bottom:12px" />
-                            <label class="tlg-label">模型</label>
+                            <label class="tlg-label">Model</label>
                             <div class="tlg-row">
                                 <select class="tlg-select" id="tlg-model-select" style="flex:1"></select>
-                                <button class="tlg-btn" id="tlg-fetch-models">拉取列表</button>
+                                <button class="tlg-btn" id="tlg-fetch-models">Fetch List</button>
                             </div>
-                            <label class="tlg-label" style="margin-top:4px">或手动输入模型名称</label>
+                            <label class="tlg-label" style="margin-top:4px">Or type model name manually</label>
                             <input class="tlg-input" id="tlg-model-manual" placeholder="gpt-4o-mini" value="${escHtml(state.settings.model)}" style="margin-bottom:4px" />
                         </div>
                         <div class="tlg-section">
-                            <div class="tlg-section-title">向量 API（可选）</div>
-                            <label class="tlg-label">向量 API 地址</label>
+                            <div class="tlg-section-title">Vector API (optional)</div>
+                            <label class="tlg-label">Vector API URL</label>
                             <input class="tlg-input" id="tlg-vec-url" placeholder="https://…" value="${escHtml(state.settings.vectorUrl)}" style="margin-bottom:8px" />
-                            <label class="tlg-label">向量 API 密钥</label>
+                            <label class="tlg-label">Vector API Key</label>
                             <input class="tlg-input" id="tlg-vec-key" type="password" value="${escHtml(state.settings.vectorKey)}" style="margin-bottom:8px" />
-                            <label class="tlg-label">检索提示词模板</label>
+                            <label class="tlg-label">Retrieval Prompt Template</label>
                             <textarea class="tlg-textarea" id="tlg-vec-prompt" style="min-height:80px">${escHtml(state.settings.vectorPrompt)}</textarea>
                         </div>
-                        <button class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%;margin-top:4px">保存引擎设置</button>
+                        <button class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%;margin-top:4px">Save Engine Settings</button>
                     </div>
                 </div>
 
@@ -949,7 +948,7 @@
             const sel = document.getElementById("tlg-model-select").value;
             state.settings.model = manual || sel;
             saveToMetadata();
-            toast("引擎设置已保存。");
+            toast("Engine settings saved.");
         };
 
         // Fetch models
@@ -964,13 +963,13 @@
         document.getElementById("tlg-test-api").onclick = async () => {
             const url = document.getElementById("tlg-api-url").value.trim();
             const key = document.getElementById("tlg-api-key").value.trim();
-            if (!url) { toast("请先输入地址。"); return; }
-            toast("正在测试…");
+            if (!url) { toast("Enter URL first."); return; }
+            toast("Testing…");
             try {
                 const res = await fetch(buildEndpoint(url, "/models"), {
                     headers: key ? { Authorization: `Bearer ${key}` } : {},
                 });
-                if (res.ok) toast("✓ API 可达。");
+                if (res.ok) toast("✓ API reachable.");
                 else toast(`✗ HTTP ${res.status}`);
             } catch (e) {
                 toast("✗ " + e.message);
@@ -1119,7 +1118,7 @@
                 loadFromMetadata();
                 showAnchorModal(value || "");
                 return "";
-            }, [], "创建河岸凝视锚定点", true, true);
+            }, [], "Create a Riparian Gaze anchor point", true, true);
         }
 
         // Fallback: intercept via event
@@ -1133,7 +1132,7 @@
                             showAnchorModal(String(value || ""));
                             return "";
                         },
-                        helpString: "创建河岸凝视因果锚定点。",
+                        helpString: "Create a Riparian Gaze causal anchor point.",
                     })
                 );
             } catch (e) {
@@ -1163,13 +1162,13 @@
             if (el) {
                 const btn = document.createElement("div");
                 btn.id = BTN_ID;
-                btn.title = "河岸凝视";
+                btn.title = "The Riparian Gaze";
                 btn.style.cssText = `
                     cursor:pointer; padding:4px 8px; font-size:13px;
                     color:#c0c0c8; display:flex; align-items:center; gap:6px;
                     white-space:nowrap;
                 `;
-                btn.innerHTML = `<span style="font-size:16px">🌊</span> 河岸凝视`;
+                btn.innerHTML = `<span style="font-size:16px">🌊</span> Riparian Gaze`;
                 btn.onclick = () => {
                     const overlay = document.getElementById("tlg-overlay");
                     if (overlay && overlay.classList.contains("tlg-active")) {
@@ -1212,7 +1211,7 @@
                         state.turnsSinceAnchor += n - (state._lastChatLen || 0);
                         state._lastChatLen = n;
                         if (state.turnsSinceAnchor >= state.settings.autoInterval) {
-                            toast(`⚓ 该锚定了！(距上次锚定已过 ${state.turnsSinceAnchor} 轮)`);
+                            toast(`⚓ Time to anchor! (${state.turnsSinceAnchor} turns since last anchor)`);
                             state.turnsSinceAnchor = 0;
                         }
                     }
@@ -1251,7 +1250,7 @@
         // Watch for chat changes & auto-mode
         watchChatChange();
 
-        console.log("[TLG] 河岸凝视已加载。");
+        console.log("[TLG] The Riparian Gaze loaded.");
     }
 
     if (document.readyState === "loading") {
