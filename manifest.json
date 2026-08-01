@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Meldanna",
-    "version": "0.3.1",
+    "version": "0.3.0",
+    "homePage": "https://github.com/Meldanna/The-Riparian-Gaze",
     "auto_update": true
-    "homePage": "https://github.com/Meldanna/The-Riparian-Gaze"
 }
