@@ -1,16 +1,12 @@
 /**
- * 河岸凝视 v2.4
- * - 打开方式严格对齐已验证 max 框架
- * - 启动清理残留，避免顶栏被顶
- * - 弹窗 translate 居中
- * - 样式仅 #tlg-* 作用域
+ * 河岸凝视 v2.2
+ * 打开方式对齐已验证的移动端框架：#tlg-panel + display:flex/none
  */
 (function () {
-    'use strict';
-    console.log('[TLG] 河岸凝视 v2.4 启动');
+    "use strict";
 
-    var EXT_NAME = 'RiparianGaze';
-    var METADATA_KEY = 'tlg_data';
+    var EXT_NAME = "RiparianGaze";
+    var METADATA_KEY = "tlg_data";
 
     var state = {
         nodes: [],
@@ -20,93 +16,107 @@
             autoMode: false,
             autoInterval: 10,
             lastNMessages: 5,
-            apiUrl: '',
-            apiKey: '',
-            model: '',
+            apiUrl: "",
+            apiKey: "",
+            model: "",
             modelList: [],
-            summaryPrompt: '请简洁总结近期对话中的关键事件。'
+            vectorUrl: "",
+            vectorKey: "",
+            vectorPrompt: "根据以下上下文：\n{{context}}\n\n请简洁总结关键事件。",
+            summaryPrompt: "请简洁总结近期对话中的关键事件。"
         },
         summaries: [],
         turnsSinceAnchor: 0,
         _lastChatLen: 0
     };
 
-    var tlgCanvas = null, tlgCtx = null;
+    var canvas = null, ctx = null;
     var camX = 0, camY = 0, camZoom = 1;
     var isPanning = false, panStartX = 0, panStartY = 0;
 
-    function getCtx() {
-        return window.SillyTavern.getContext();
+    function getST() {
+        return (window.SillyTavern && window.SillyTavern.getContext)
+            ? window.SillyTavern.getContext()
+            : null;
     }
 
     function generateId() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
 
-    function toast(msg) {
-        var el = document.createElement('div');
+    function toast(msg, duration) {
+        duration = duration || 2800;
+        var el = document.createElement("div");
+        el.className = "tlg-toast";
         el.textContent = msg;
-        el.setAttribute('style',
-            'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);' +
-            'background:#0a0a10;border:1px solid #1a1a28;border-radius:8px;' +
-            'padding:12px 16px;color:#c0c0c8;font-size:13px;z-index:100002;' +
-            'max-width:80vw;text-align:center;pointer-events:none;'
-        );
         document.body.appendChild(el);
-        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 2600);
+        setTimeout(function () {
+            el.style.opacity = "0";
+            el.style.transition = "opacity 0.4s";
+            setTimeout(function () { el.remove(); }, 400);
+        }, duration);
     }
 
     function escHtml(str) {
-        return String(str || '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        return String(str || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
     }
 
-    /** 启动时清掉旧版残留，防止黑条/顶栏下移 */
-    function cleanupLeftovers() {
-        ['tlg-panel', 'tlg-overlay', 'tlg-modal', 'tlg-modal-box', 'tlg-anchor-modal'].forEach(function (id) {
-            var el = document.getElementById(id);
-            if (el && el.parentNode) el.parentNode.removeChild(el);
-        });
-        // 绝不在未打开时改 body 布局
+    // ── 开关 ──
+    function getExtSettings() {
+        var st = getST();
+        var es = (st && st.extensionSettings) || window.extension_settings || {};
+        if (!es[EXT_NAME]) es[EXT_NAME] = { enabled: true };
+        if (typeof es[EXT_NAME].enabled !== "boolean") es[EXT_NAME].enabled = true;
+        return es[EXT_NAME];
+    }
+    function isEnabled() {
+        try { return getExtSettings().enabled !== false; } catch (e) { return true; }
+    }
+    function setEnabled(on) {
         try {
-            if (document.body && document.body.style) {
-                // 只清我们可能写过的 overflow，不碰 padding/margin
-                if (document.body.getAttribute('data-tlg-lock') === '1') {
-                    document.body.style.overflow = '';
-                    document.body.removeAttribute('data-tlg-lock');
-                }
-            }
-        } catch (e) {}
+            var st = getST();
+            getExtSettings().enabled = !!on;
+            if (st && typeof st.saveSettingsDebounced === "function") st.saveSettingsDebounced();
+            else if (typeof window.saveSettingsDebounced === "function") window.saveSettingsDebounced();
+            if (!on) closePanel();
+            injectMenuButton();
+            var toggle = document.getElementById("tlg_enable_toggle");
+            if (toggle) toggle.classList.toggle("on", !!on);
+        } catch (e) { console.warn("[TLG] setEnabled", e); }
     }
 
-    function saveState() {
-        var ctx = getCtx();
-        if (!ctx.chatMetadata && !ctx.chat_metadata) return;
-        var meta = ctx.chatMetadata || ctx.chat_metadata;
-        meta[METADATA_KEY] = JSON.parse(JSON.stringify(state));
-        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+    // ── 元数据 ──
+    function saveToMetadata() {
+        var st = getST();
+        if (!st) return;
+        if (!st.chat_metadata) st.chat_metadata = {};
+        st.chat_metadata[METADATA_KEY] = JSON.parse(JSON.stringify(state));
+        if (typeof st.saveMetadata === "function") st.saveMetadata();
+        else if (typeof window.saveMetadataDebounced === "function") window.saveMetadataDebounced();
     }
 
-    function loadState() {
-        var ctx = getCtx();
-        var meta = (ctx.chatMetadata || ctx.chat_metadata) || {};
-        var saved = meta[METADATA_KEY];
+    function loadFromMetadata() {
+        var st = getST();
+        if (!st) return;
+        var saved = st.chat_metadata && st.chat_metadata[METADATA_KEY];
         if (saved) {
             state = JSON.parse(JSON.stringify(saved));
             if (!state.settings) state.settings = {};
-            if (!state.nodes) state.nodes = [];
-            if (!state.summaries) state.summaries = [];
+            if (state._lastChatLen == null) state._lastChatLen = 0;
         } else {
             resetState();
-            saveState();
+            saveToMetadata();
         }
     }
 
     function resetState() {
         var rootId = generateId();
         state.nodes = [{
-            id: rootId, name: '起源点', brief: '时间线起源。',
+            id: rootId, name: "起源点", brief: "时间线起源。",
             parentId: null, msgIdx: 0, statData: null,
             timestamp: Date.now(), children: []
         }];
@@ -118,10 +128,7 @@
     }
 
     function findNode(id) {
-        for (var i = 0; i < state.nodes.length; i++) {
-            if (state.nodes[i].id === id) return state.nodes[i];
-        }
-        return null;
+        return state.nodes.find(function (n) { return n.id === id; }) || null;
     }
 
     function getPathToRoot(nodeId) {
@@ -134,362 +141,354 @@
         return path;
     }
 
-    function getMVU() {
+    // ── MVU ──
+    function getMVUStatData() {
         try {
-            var ctx = getCtx();
-            var meta = ctx.chatMetadata || ctx.chat_metadata || {};
-            if (meta.stat_data != null) return JSON.parse(JSON.stringify(meta.stat_data));
-            if (typeof window.getAllVariables === 'function') {
+            var st = getST();
+            if (st && st.chat_metadata && st.chat_metadata.stat_data != null)
+                return JSON.parse(JSON.stringify(st.chat_metadata.stat_data));
+            if (typeof window.getAllVariables === "function") {
                 var all = window.getAllVariables();
                 if (all && all.stat_data != null) return JSON.parse(JSON.stringify(all.stat_data));
             }
-        } catch (e) {}
+        } catch (e) { console.warn("[TLG] getMVUStatData", e); }
         return null;
     }
 
-    function setMVU(data) {
-        if (!data) return;
+    function setMVUStatData(data) {
+        if (data == null) return;
         try {
-            var ctx = getCtx();
-            var meta = ctx.chatMetadata || ctx.chat_metadata;
-            if (meta) {
-                meta.stat_data = JSON.parse(JSON.stringify(data));
-                if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+            var st = getST();
+            if (st && st.chat_metadata) {
+                st.chat_metadata.stat_data = JSON.parse(JSON.stringify(data));
+                if (typeof st.saveMetadata === "function") st.saveMetadata();
             }
-            if (typeof window.setVariable === 'function') window.setVariable('stat_data', data);
-        } catch (e) {}
+            if (typeof window.setVariable === "function") window.setVariable("stat_data", data);
+        } catch (e) { console.warn("[TLG] setMVUStatData", e); }
     }
 
     function applyVisibility(targetNodeId) {
-        var ctx = getCtx();
-        if (!ctx.chat) return;
+        var st = getST();
+        if (!st || !st.chat) return;
         var pathIds = getPathToRoot(targetNodeId);
+        var pathNodes = pathIds.map(findNode).filter(Boolean);
         var visible = {};
         var i, m, node, next, start, end;
-        for (i = 0; i < pathIds.length; i++) {
-            node = findNode(pathIds[i]);
-            next = i + 1 < pathIds.length ? findNode(pathIds[i + 1]) : null;
-            if (!node) continue;
+        for (i = 0; i < pathNodes.length; i++) {
+            node = pathNodes[i];
+            next = pathNodes[i + 1] || null;
             start = node.msgIdx;
             end = next ? next.msgIdx - 1 : node.msgIdx;
             for (m = start; m <= end; m++) visible[m] = true;
         }
         var target = findNode(targetNodeId);
-        var lastN = (state.settings && state.settings.lastNMessages) || 5;
-        var endIdx = target ? target.msgIdx : ctx.chat.length - 1;
+        var lastN = Math.max(0, (state.settings && state.settings.lastNMessages) || 5);
+        var endIdx = target ? target.msgIdx : st.chat.length - 1;
         for (m = Math.max(0, endIdx - lastN + 1); m <= endIdx; m++) visible[m] = true;
-        for (i = 0; i < ctx.chat.length; i++) {
-            if (visible[i]) delete ctx.chat[i].is_hidden;
-            else ctx.chat[i].is_hidden = true;
+        for (i = 0; i < st.chat.length; i++) {
+            if (visible[i]) delete st.chat[i].is_hidden;
+            else st.chat[i].is_hidden = true;
         }
-        if (typeof ctx.saveChat === 'function') ctx.saveChat();
+        if (typeof st.saveChat === "function") st.saveChat();
     }
 
+    // ── 锚定 / 跳转 ──
     function createAnchor(name, brief) {
-        var ctx = getCtx();
-        var msgIdx = ctx.chat ? Math.max(0, ctx.chat.length - 1) : 0;
-        var newId = generateId();
+        var st = getST();
+        if (!st) return;
+        var msgIdx = st.chat ? Math.max(0, st.chat.length - 1) : 0;
         var parentId = state.currentNodeId;
-        var node = {
+        var newId = generateId();
+        var newNode = {
             id: newId,
-            name: name || ('节点 ' + state.nodes.length),
-            brief: brief || '',
+            name: name || ("节点 " + state.nodes.length),
+            brief: brief || "",
             parentId: parentId,
             msgIdx: msgIdx,
-            statData: getMVU(),
+            statData: getMVUStatData(),
             timestamp: Date.now(),
             children: []
         };
         var parent = findNode(parentId);
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
-        state.nodes.push(node);
+        state.nodes.push(newNode);
         state.currentNodeId = newId;
+        state.selectedNodeId = newId;
         state.turnsSinceAnchor = 0;
-        saveState();
-        toast('⚓ 已锚定: ' + node.name);
+        saveToMetadata();
+        toast("⚓ 已锚定: " + newNode.name);
         renderCanvas();
         refreshArchive();
+        return newId;
     }
 
     function jumpToNode(nodeId) {
         var node = findNode(nodeId);
-        if (!node) { toast('节点不存在'); return; }
-        if (node.statData) setMVU(node.statData);
+        if (!node) { toast("节点不存在。"); return; }
+        if (node.statData != null) setMVUStatData(node.statData);
         applyVisibility(nodeId);
         state.currentNodeId = nodeId;
         state.turnsSinceAnchor = 0;
-        saveState();
-        toast('↩ 已跳转至: ' + node.name);
+        saveToMetadata();
+        toast("↩ 已跳转至: " + node.name);
         renderCanvas();
         refreshArchive();
         closeBriefPanel();
     }
 
-    /** 锚定弹窗：遮罩 + 正中盒子，不碰 body */
-    function showAnchorModal(prefill) {
-    closeModal();
+    function showAnchorModal(prefillName) {
+        if (!isEnabled()) { toast("河岸凝视已关闭。"); return; }
+        var existing = document.getElementById("tlg-anchor-modal");
+        if (existing) existing.remove();
 
-    // 遮罩：铺满全屏，拦截所有触摸
-    var mask = document.createElement('div');
-    mask.id = 'tlg-modal';
-    mask.setAttribute('style',
-        'position:fixed;top:0;left:0;width:100%;height:100%;' +
-        'background:rgba(0,0,0,0.75);z-index:2147483646;' +
-        'touch-action:none;overscroll-behavior:none;'
-    );
+        var backdrop = document.createElement("div");
+        backdrop.className = "tlg-modal-backdrop";
+        backdrop.id = "tlg-anchor-modal";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;";
+        backdrop.innerHTML =
+            '<div class="tlg-modal">' +
+            '<div class="tlg-modal-title">⚓ 创建锚定点</div>' +
+            '<div style="margin-bottom:12px">' +
+            '<label class="tlg-label">节点名称</label>' +
+            '<input class="tlg-input" id="tlg-anc-name" placeholder="例：决斗之前…" value="' + escHtml(prefillName || "") + '" />' +
+            "</div><div>" +
+            '<label class="tlg-label">简要描述</label>' +
+            '<textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea>' +
+            '</div><div class="tlg-modal-actions">' +
+            '<button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">⚓ 确认锚定</button>' +
+            "</div></div>";
+        document.body.appendChild(backdrop);
 
-    // 弹窗本体：用 flex 居中，不用 transform（避免某些手机偏移）
-    var wrap = document.createElement('div');
-    wrap.setAttribute('style',
-        'position:fixed;top:0;left:0;width:100%;height:100%;' +
-        'z-index:2147483647;display:flex;align-items:center;justify-content:center;' +
-        'padding:16px;box-sizing:border-box;' +
-        'touch-action:none;overscroll-behavior:none;'
-    );
-
-    var box = document.createElement('div');
-    box.id = 'tlg-modal-box';
-    box.setAttribute('style',
-        'background:#0a0a10;border:1px solid #2a2a3a;border-radius:10px;' +
-        'padding:20px;width:100%;max-width:420px;color:#c0c0c8;box-sizing:border-box;' +
-        'max-height:80vh;overflow-y:auto;'
-    );
-    box.innerHTML =
-        '<div style="font-size:16px;font-weight:600;color:#e8e8f0;margin-bottom:14px;">⚓ 创建锚定点</div>' +
-        '<div style="margin-bottom:12px;">' +
-        '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">节点名称</div>' +
-        '<input id="tlg-anc-name" value="' + escHtml(prefill || '') + '" placeholder="例：决斗之前…" ' +
-        'style="width:100%;padding:10px 12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:16px;box-sizing:border-box;">' +
-        '</div>' +
-        '<div style="margin-bottom:16px;">' +
-        '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">简要描述</div>' +
-        '<textarea id="tlg-anc-brief" placeholder="此时此刻的情况概述…" ' +
-        'style="width:100%;padding:10px 12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:14px;min-height:90px;box-sizing:border-box;resize:vertical;"></textarea>' +
-        '</div>' +
-        '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
-        '<button type="button" id="tlg-anc-cancel" style="padding:8px 16px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:13px;cursor:pointer;">取消</button>' +
-        '<button type="button" id="tlg-anc-ok" style="padding:8px 16px;background:rgba(192,192,200,0.12);border:1px solid #6a6a78;border-radius:4px;color:#e8e8f0;font-size:13px;cursor:pointer;">⚓ 确认锚定</button>' +
-        '</div>';
-
-    wrap.appendChild(box);
-    document.body.appendChild(mask);
-    document.body.appendChild(wrap);
-    wrap.id = 'tlg-modal-wrap';
-
-    // 点遮罩关闭
-    mask.addEventListener('click', closeModal);
-    // 拦截遮罩上的滑动，不传给聊天区
-    mask.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
-    wrap.addEventListener('touchmove', function(e){
-        // 仅允许 box 内部滚动，wrap 本身不传透
-        if (!box.contains(e.target)) e.preventDefault();
-    }, { passive: false });
-
-    document.getElementById('tlg-anc-cancel').onclick = closeModal;
-    document.getElementById('tlg-anc-ok').onclick = function () {
-        var name = document.getElementById('tlg-anc-name').value.trim() || ('节点 ' + state.nodes.length);
-        var brief = document.getElementById('tlg-anc-brief').value.trim();
-        createAnchor(name, brief);
-        closeModal();
-    };
-    setTimeout(function () {
-        var inp = document.getElementById('tlg-anc-name');
-        if (inp) inp.focus();
-    }, 50);
-}
-
-function closeModal() {
-    ['tlg-modal', 'tlg-modal-wrap', 'tlg-modal-box'].forEach(function(id){
-        var el = document.getElementById(id);
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-    });
-}
-
-
-    function closeModal() {
-        var m = document.getElementById('tlg-modal');
-        var b = document.getElementById('tlg-modal-box');
-        if (m && m.parentNode) m.parentNode.removeChild(m);
-        if (b && b.parentNode) b.parentNode.removeChild(b);
+        var nameInput = backdrop.querySelector("#tlg-anc-name");
+        backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-anc-ok").onclick = function () {
+            createAnchor(
+                nameInput.value.trim() || ("节点 " + state.nodes.length),
+                backdrop.querySelector("#tlg-anc-brief").value.trim()
+            );
+            backdrop.remove();
+        };
+        backdrop.addEventListener("click", function (e) {
+            if (e.target === backdrop) backdrop.remove();
+        });
+        setTimeout(function () { nameInput.focus(); }, 80);
     }
 
     // ── 画布 ──
     function layoutTree() {
-        var pos = {}, H = 180, V = 120;
-        function w(id) {
-            var n = findNode(id);
-            if (!n || !n.children.length) return 1;
-            var s = 0;
-            for (var i = 0; i < n.children.length; i++) s += w(n.children[i]);
-            return s;
+        var positions = {};
+        var H_GAP = 180, V_GAP = 120;
+        function subtreeWidth(nodeId) {
+            var node = findNode(nodeId);
+            if (!node || !node.children.length) return 1;
+            return node.children.reduce(function (s, cid) { return s + subtreeWidth(cid); }, 0);
         }
-        function assign(id, depth, slot) {
-            var n = findNode(id); if (!n) return;
-            var nw = w(id);
-            pos[id] = { x: (slot + nw / 2) * H, y: depth * V + 60 };
-            var cs = slot;
-            for (var i = 0; i < n.children.length; i++) {
-                var cw = w(n.children[i]);
-                assign(n.children[i], depth + 1, cs);
-                cs += cw;
+        function assign(nodeId, depth, slotStart) {
+            var node = findNode(nodeId);
+            if (!node) return;
+            var w = subtreeWidth(nodeId);
+            positions[nodeId] = { x: (slotStart + w / 2) * H_GAP, y: depth * V_GAP + 60 };
+            var childSlot = slotStart;
+            for (var i = 0; i < node.children.length; i++) {
+                var cid = node.children[i];
+                var cw = subtreeWidth(cid);
+                assign(cid, depth + 1, childSlot);
+                childSlot += cw;
             }
         }
-        var root = null;
-        for (var i = 0; i < state.nodes.length; i++) {
-            if (!state.nodes[i].parentId) { root = state.nodes[i]; break; }
-        }
+        var root = state.nodes.find(function (n) { return n.parentId === null; });
         if (root) assign(root.id, 0, 0);
-        return pos;
+        return positions;
     }
 
     function renderCanvas() {
-        if (!tlgCanvas || !tlgCtx) return;
+        if (!canvas || !ctx) return;
         var dpr = window.devicePixelRatio || 1;
-        var rect = tlgCanvas.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        tlgCanvas.width = rect.width * dpr;
-        tlgCanvas.height = rect.height * dpr;
-        tlgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        tlgCtx.fillStyle = '#050508';
-        tlgCtx.fillRect(0, 0, rect.width, rect.height);
-        tlgCtx.save();
-        tlgCtx.translate(rect.width / 2 + camX, rect.height / 2 + camY);
-        tlgCtx.scale(camZoom, camZoom);
+        var rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = "#050508";
+        ctx.fillRect(0, 0, rect.width, rect.height);
+        ctx.save();
+        ctx.translate(rect.width / 2 + camX, rect.height / 2 + camY);
+        ctx.scale(camZoom, camZoom);
 
-        var pos = layoutTree();
-        var R = 22;
+        var positions = layoutTree();
+        var NODE_R = 22;
         var path = getPathToRoot(state.currentNodeId);
-        var i, n, f, t, cy, p, isCur, onPath;
+        var i, node, from, to, pos, isCurrent, isSelected, onPath, isActive, cy, label, grd;
 
         for (i = 0; i < state.nodes.length; i++) {
-            n = state.nodes[i];
-            if (!n.parentId) continue;
-            f = pos[n.parentId]; t = pos[n.id];
-            if (!f || !t) continue;
-            var active = path.indexOf(n.id) !== -1 && path.indexOf(n.parentId) !== -1;
-            cy = (f.y + t.y) / 2;
-            tlgCtx.beginPath();
-            tlgCtx.moveTo(f.x, f.y + R);
-            tlgCtx.bezierCurveTo(f.x, cy, t.x, cy, t.x, t.y - R);
-            tlgCtx.strokeStyle = active ? 'rgba(220,220,230,0.85)' : 'rgba(192,192,210,0.18)';
-            tlgCtx.lineWidth = active ? 1.8 : 1;
-            tlgCtx.stroke();
+            node = state.nodes[i];
+            if (!node.parentId) continue;
+            from = positions[node.parentId];
+            to = positions[node.id];
+            if (!from || !to) continue;
+            isActive = path.indexOf(node.id) !== -1 && path.indexOf(node.parentId) !== -1;
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y + NODE_R);
+            cy = (from.y + to.y) / 2;
+            ctx.bezierCurveTo(from.x, cy, to.x, cy, to.x, to.y - NODE_R);
+            ctx.strokeStyle = isActive ? "rgba(220,220,230,0.85)" : "rgba(192,192,210,0.18)";
+            ctx.lineWidth = isActive ? 1.8 : 1;
+            ctx.shadowBlur = isActive ? 8 : 0;
+            ctx.shadowColor = "rgba(192,192,210,0.5)";
+            ctx.stroke();
+            ctx.shadowBlur = 0;
         }
 
         for (i = 0; i < state.nodes.length; i++) {
-            n = state.nodes[i];
-            p = pos[n.id]; if (!p) continue;
-            isCur = n.id === state.currentNodeId;
-            onPath = path.indexOf(n.id) !== -1;
-            tlgCtx.beginPath();
-            tlgCtx.arc(p.x, p.y, R, 0, Math.PI * 2);
-            if (isCur) {
-                tlgCtx.fillStyle = 'rgba(255,255,255,0.15)';
-                tlgCtx.strokeStyle = '#fff';
-                tlgCtx.lineWidth = 2;
-            } else if (onPath) {
-                tlgCtx.fillStyle = 'rgba(192,192,210,0.07)';
-                tlgCtx.strokeStyle = 'rgba(192,192,210,0.55)';
-                tlgCtx.lineWidth = 1.2;
-            } else {
-                tlgCtx.fillStyle = 'rgba(192,192,210,0.04)';
-                tlgCtx.strokeStyle = 'rgba(192,192,210,0.2)';
-                tlgCtx.lineWidth = 1;
+            node = state.nodes[i];
+            pos = positions[node.id];
+            if (!pos) continue;
+            isCurrent = node.id === state.currentNodeId;
+            isSelected = node.id === state.selectedNodeId;
+            onPath = path.indexOf(node.id) !== -1;
+
+            if (isCurrent) {
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, NODE_R + 12, 0, Math.PI * 2);
+                grd = ctx.createRadialGradient(pos.x, pos.y, NODE_R, pos.x, pos.y, NODE_R + 14);
+                grd.addColorStop(0, "rgba(255,255,255,0.25)");
+                grd.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = grd;
+                ctx.fill();
             }
-            tlgCtx.fill();
-            tlgCtx.stroke();
-            tlgCtx.fillStyle = isCur ? '#fff' : 'rgba(220,220,230,0.8)';
-            tlgCtx.font = '10px sans-serif';
-            tlgCtx.textAlign = 'center';
-            tlgCtx.textBaseline = 'top';
-            var label = n.name.length > 12 ? n.name.slice(0, 11) + '…' : n.name;
-            tlgCtx.fillText(label, p.x, p.y + R + 5);
+
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
+            if (isCurrent) {
+                ctx.fillStyle = "rgba(255,255,255,0.15)";
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+                ctx.shadowColor = "rgba(255,255,255,0.8)";
+                ctx.shadowBlur = 18;
+            } else if (isSelected) {
+                ctx.fillStyle = "rgba(192,192,210,0.12)";
+                ctx.strokeStyle = "#c0c0d0";
+                ctx.lineWidth = 2;
+                ctx.shadowBlur = 10;
+            } else if (onPath) {
+                ctx.fillStyle = "rgba(192,192,210,0.07)";
+                ctx.strokeStyle = "rgba(192,192,210,0.55)";
+                ctx.lineWidth = 1.2;
+                ctx.shadowBlur = 0;
+            } else {
+                ctx.fillStyle = "rgba(192,192,210,0.04)";
+                ctx.strokeStyle = "rgba(192,192,210,0.2)";
+                ctx.lineWidth = 1;
+                ctx.shadowBlur = 0;
+            }
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = isCurrent ? "#fff" : onPath ? "rgba(220,220,230,0.85)" : "rgba(180,180,195,0.55)";
+            ctx.font = isCurrent ? "bold 10px sans-serif" : "10px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+            label = node.name.length > 12 ? node.name.slice(0, 11) + "…" : node.name;
+            ctx.fillText(label, pos.x, pos.y + NODE_R + 5);
         }
-        tlgCtx.restore();
+        ctx.restore();
     }
 
-    function hitTest(clientX, clientY) {
-        if (!tlgCanvas) return null;
-        var rect = tlgCanvas.getBoundingClientRect();
+    function canvasHitTest(clientX, clientY) {
+        if (!canvas) return null;
+        var rect = canvas.getBoundingClientRect();
         var wx = (clientX - rect.left - rect.width / 2 - camX) / camZoom;
         var wy = (clientY - rect.top - rect.height / 2 - camY) / camZoom;
-        var pos = layoutTree(), R = 22, ids = Object.keys(pos);
+        var positions = layoutTree();
+        var NODE_R = 22;
+        var ids = Object.keys(positions);
         for (var i = 0; i < ids.length; i++) {
-            var p = pos[ids[i]];
-            var dx = wx - p.x, dy = wy - p.y;
-            if (dx * dx + dy * dy <= (R + 4) * (R + 4)) return ids[i];
+            var pos = positions[ids[i]];
+            var dx = wx - pos.x, dy = wy - pos.y;
+            if (dx * dx + dy * dy <= (NODE_R + 4) * (NODE_R + 4)) return ids[i];
         }
         return null;
     }
 
+    // ── 简介 / 档案 / 总结 ──
     function openBriefPanel(nodeId) {
         var node = findNode(nodeId);
         if (!node) return;
         state.selectedNodeId = nodeId;
-        var panel = document.getElementById('tlg-brief-panel');
+        var panel = document.getElementById("tlg-brief-panel");
         if (!panel) return;
-        panel.classList.add('open');
-        panel.style.display = 'flex';
-        document.getElementById('tlg-brief-title').textContent = node.name;
-        var body = document.getElementById('tlg-brief-body');
+        panel.classList.add("open");
+        panel.querySelector(".tlg-brief-header span").textContent = node.name;
+        var body = panel.querySelector(".tlg-brief-body");
         body.innerHTML =
-            '<div style="margin-bottom:8px;font-size:11px;color:#6a6a78">' + new Date(node.timestamp).toLocaleString() + '</div>' +
-            '<div style="margin-bottom:8px;font-size:11px;color:#6a6a78">消息 ' + node.msgIdx + ' | ' + (node.statData ? 'MVU✓' : '无快照') + '</div>' +
-            '<div style="white-space:pre-wrap;margin-bottom:12px">' + (node.brief ? escHtml(node.brief) : '<em style="color:#6a6a78">暂无描述</em>') + '</div>' +
-            '<textarea id="tlg-brief-edit" style="width:100%;min-height:90px;padding:10px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:14px;box-sizing:border-box;">' + escHtml(node.brief || '') + '</textarea>' +
-            '<button type="button" id="tlg-brief-save" class="tlg-btn tlg-btn-primary" style="margin-top:8px;width:100%;padding:10px;">保存描述</button>';
-        document.getElementById('tlg-brief-save').onclick = function () {
-            node.brief = document.getElementById('tlg-brief-edit').value;
-            saveState(); toast('描述已保存'); refreshArchive();
+            '<div style="margin-bottom:8px;font-size:11px;color:var(--tlg-silver-dim)">' +
+            new Date(node.timestamp).toLocaleString() + "</div>" +
+            '<div style="margin-bottom:8px;font-size:11px;color:var(--tlg-silver-dim)">' +
+            "消息索引: " + node.msgIdx + " | " + (node.statData ? "MVU快照 ✓" : "无MVU快照") + "</div>" +
+            '<div style="white-space:pre-wrap;word-break:break-word">' +
+            (node.brief ? escHtml(node.brief) : "<em style='color:var(--tlg-silver-dim)'>暂无描述。</em>") + "</div>" +
+            '<div style="margin-top:12px"><label class="tlg-label">编辑描述</label>' +
+            '<textarea class="tlg-textarea" id="tlg-brief-edit" style="min-height:100px">' + escHtml(node.brief || "") + "</textarea>" +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%!important">保存描述</button></div>';
+        body.querySelector("#tlg-brief-save").onclick = function () {
+            node.brief = body.querySelector("#tlg-brief-edit").value;
+            saveToMetadata();
+            toast("描述已保存。");
+            refreshArchive();
         };
-        document.getElementById('tlg-brief-footer').innerHTML =
-            '<button type="button" id="tlg-brief-jump" class="tlg-btn tlg-btn-primary" style="width:100%;padding:12px;">↩ 确认跳转至此节点</button>';
-        document.getElementById('tlg-brief-jump').onclick = function () { jumpToNode(nodeId); };
+        panel.querySelector(".tlg-brief-footer").innerHTML =
+            '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此节点</button>';
+        panel.querySelector("#tlg-brief-jump").onclick = function () { jumpToNode(nodeId); };
         renderCanvas();
     }
 
     function closeBriefPanel() {
-        var panel = document.getElementById('tlg-brief-panel');
-        if (panel) {
-            panel.classList.remove('open');
-            panel.style.display = 'none';
-        }
+        var panel = document.getElementById("tlg-brief-panel");
+        if (panel) panel.classList.remove("open");
         state.selectedNodeId = null;
         renderCanvas();
     }
 
     function refreshArchive() {
-        var container = document.getElementById('tlg-archive-list');
+        var container = document.getElementById("tlg-archive-list");
         if (!container) return;
         if (!state.nodes.length) {
-            container.innerHTML = '<div style="color:#6a6a78;padding:20px">暂无节点</div>';
+            container.innerHTML = '<div style="color:var(--tlg-silver-dim);padding:20px">暂无节点。</div>';
             return;
         }
         var sorted = state.nodes.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
         container.innerHTML = sorted.map(function (node) {
-            var isCur = node.id === state.currentNodeId;
-            return '<div style="background:#0a0a10;border:1px solid ' + (isCur ? '#c0c0c8' : '#1a1a28') + ';border-radius:6px;padding:12px;margin-bottom:10px;">' +
-                '<div style="font-weight:600;color:#e8e8f0">' + escHtml(node.name) + (isCur ? ' <span style="color:#6a6a78;font-size:11px">(当前)</span>' : '') + '</div>' +
-                '<div style="font-size:11px;color:#6a6a78;margin-top:4px">' + new Date(node.timestamp).toLocaleString() + ' · 消息 ' + node.msgIdx + '</div>' +
-                '<div style="font-size:12px;margin-top:8px">' + escHtml(node.brief || '') + '</div>' +
+            var isCurrent = node.id === state.currentNodeId;
+            return (
+                '<div class="tlg-archive-card ' + (isCurrent ? "current" : "") + '">' +
+                '<div class="tlg-archive-title">' + escHtml(node.name) +
+                (isCurrent ? " <span style='color:var(--tlg-silver-dim);font-size:11px'>(当前)</span>" : "") +
+                "</div>" +
+                '<div class="tlg-archive-meta">' + new Date(node.timestamp).toLocaleString() +
+                " · 消息 " + node.msgIdx + "</div>" +
+                '<div class="tlg-archive-brief">' + escHtml(node.brief || "") + "</div>" +
                 '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
-                '<button type="button" class="tlg-btn tlg-arc-view" data-nid="' + node.id + '">在树图中查看</button>' +
-                '<button type="button" class="tlg-btn tlg-btn-primary tlg-arc-jump" data-nid="' + node.id + '">↩ 跳转</button>' +
-                '<button type="button" class="tlg-btn tlg-arc-del" data-nid="' + node.id + '" style="margin-left:auto;border-color:#aa4444;color:#aa4444">✕</button>' +
-                '</div></div>';
-        }).join('');
-        container.querySelectorAll('.tlg-arc-view').forEach(function (b) {
-            b.onclick = function () { switchTab('tree'); openBriefPanel(b.getAttribute('data-nid')); };
+                '<button type="button" class="tlg-btn tlg-archive-view" data-nid="' + node.id + '">在树图中查看</button>' +
+                '<button type="button" class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="' + node.id + '">↩ 跳转至此</button>' +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-archive-del" data-nid="' + node.id + '" style="margin-left:auto">✕</button>' +
+                "</div></div>"
+            );
+        }).join("");
+
+        container.querySelectorAll(".tlg-archive-view").forEach(function (btn) {
+            btn.onclick = function () { switchTab("tree"); openBriefPanel(btn.dataset.nid); };
         });
-        container.querySelectorAll('.tlg-arc-jump').forEach(function (b) {
-            b.onclick = function () { jumpToNode(b.getAttribute('data-nid')); };
+        container.querySelectorAll(".tlg-archive-jump").forEach(function (btn) {
+            btn.onclick = function () { jumpToNode(btn.dataset.nid); };
         });
-        container.querySelectorAll('.tlg-arc-del').forEach(function (b) {
-            b.onclick = function () {
-                var nid = b.getAttribute('data-nid');
-                if (nid === state.currentNodeId) { toast('无法删除当前节点'); return; }
+        container.querySelectorAll(".tlg-archive-del").forEach(function (btn) {
+            btn.onclick = function () {
+                var nid = btn.dataset.nid;
+                if (nid === state.currentNodeId) { toast("无法删除当前所在节点。"); return; }
                 var n = findNode(nid);
-                if (!confirm('删除「' + (n ? n.name : '') + '」？')) return;
+                if (!confirm("确定删除节点「" + (n ? n.name : "") + "」？")) return;
                 deleteNode(nid);
             };
         });
@@ -500,370 +499,495 @@ function closeModal() {
         if (!node) return;
         var parent = findNode(node.parentId);
         if (parent) parent.children = parent.children.filter(function (id) { return id !== nodeId; });
-        function rm(id) {
-            var n = findNode(id); if (!n) return;
-            n.children.slice().forEach(rm);
+        function removeRecursive(id) {
+            var n = findNode(id);
+            if (!n) return;
+            n.children.slice().forEach(removeRecursive);
             state.nodes = state.nodes.filter(function (x) { return x.id !== id; });
         }
-        rm(nodeId);
-        saveState(); renderCanvas(); refreshArchive();
-        toast('节点已删除');
+        removeRecursive(nodeId);
+        saveToMetadata();
+        renderCanvas();
+        refreshArchive();
+        toast("节点已删除。");
     }
 
     function refreshSummary() {
-        var list = document.getElementById('tlg-summary-list');
+        var list = document.getElementById("tlg-summary-list");
         if (!list) return;
         if (!state.summaries || !state.summaries.length) {
-            list.innerHTML = '<div style="color:#6a6a78">暂无总结</div>';
+            list.innerHTML = '<div style="color:var(--tlg-silver-dim)">暂无总结记录。</div>';
             return;
         }
         list.innerHTML = state.summaries.slice().reverse().map(function (s, i) {
             var idx = state.summaries.length - 1 - i;
-            return '<div style="border:1px solid #1a1a28;border-radius:6px;padding:12px;margin-bottom:10px;background:#0a0a10">' +
-                '<div style="font-size:11px;color:#6a6a78;margin-bottom:6px">' + new Date(s.timestamp).toLocaleString() + '</div>' +
-                '<div style="white-space:pre-wrap;font-size:13px">' + escHtml(s.text) + '</div>' +
-                '<button type="button" data-idx="' + idx + '" style="margin-top:8px;border:1px solid #aa4444;color:#aa4444;background:transparent;border-radius:4px;padding:4px 10px;cursor:pointer">删除</button></div>';
-        }).join('');
-        list.querySelectorAll('[data-idx]').forEach(function (b) {
-            b.onclick = function () {
-                state.summaries.splice(Number(b.getAttribute('data-idx')), 1);
-                saveState(); refreshSummary();
+            return (
+                '<div class="tlg-section">' +
+                '<div style="font-size:11px;color:var(--tlg-silver-dim);margin-bottom:6px">' +
+                new Date(s.timestamp).toLocaleString() + "</div>" +
+                '<div style="font-size:13px;white-space:pre-wrap">' + escHtml(s.text) + "</div>" +
+                '<button type="button" class="tlg-btn tlg-btn-danger" style="margin-top:8px;font-size:11px" data-idx="' + idx + '">删除</button></div>'
+            );
+        }).join("");
+        list.querySelectorAll("[data-idx]").forEach(function (btn) {
+            btn.onclick = function () {
+                state.summaries.splice(Number(btn.dataset.idx), 1);
+                saveToMetadata();
+                refreshSummary();
             };
         });
     }
 
     function buildEndpoint(base, path) {
-        var url = (base || '').trim();
-        if (!/\/v\d/.test(url)) url = url.replace(/\/?$/, '/v1');
+        var url = (base || "").trim();
+        if (!/\/v\d/.test(url) && !url.endsWith("/")) url += "/v1";
+        else if (url.endsWith("/")) url = url.slice(0, -1);
         return url + path;
     }
 
     async function runSummary() {
-        var apiUrl = (state.settings.apiUrl || '').trim();
-        if (!apiUrl) { toast('请先设置 API'); return; }
-        var ctx = getCtx();
-        var chat = ((ctx && ctx.chat) || []).slice(-20).map(function (m) {
-            return (m.name || m.role) + ': ' + m.mes;
-        }).join('\n');
-        var prompt = (state.settings.summaryPrompt || '').replace('{{context}}', chat);
-        toast('正在生成…');
+        var apiUrl = (state.settings.apiUrl || "").trim();
+        var apiKey = (state.settings.apiKey || "").trim();
+        var model = (state.settings.model || "").trim();
+        if (!apiUrl) { toast("请先在引擎标签页设置 API 地址。"); return; }
+        var st = getST();
+        var recentChat = ((st && st.chat) || []).slice(-20).map(function (m) {
+            return (m.name || m.role) + ": " + m.mes;
+        }).join("\n");
+        var prompt = (state.settings.summaryPrompt || "").replace("{{context}}", recentChat);
+        var btn = document.getElementById("tlg-summary-run");
+        if (btn) btn.disabled = true;
+        toast("正在生成总结…");
         try {
-            var res = await fetch(buildEndpoint(apiUrl, '/chat/completions'), {
-                method: 'POST',
+            var res = await fetch(buildEndpoint(apiUrl, "/chat/completions"), {
+                method: "POST",
                 headers: Object.assign(
-                    { 'Content-Type': 'application/json' },
-                    state.settings.apiKey ? { Authorization: 'Bearer ' + state.settings.apiKey } : {}
+                    { "Content-Type": "application/json" },
+                    apiKey ? { Authorization: "Bearer " + apiKey } : {}
                 ),
                 body: JSON.stringify({
-                    model: state.settings.model || undefined,
-                    messages: [{ role: 'user', content: prompt }],
+                    model: model || undefined,
+                    messages: [{ role: "user", content: prompt }],
                     max_tokens: 512
                 })
             });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
+            if (!res.ok) throw new Error("HTTP " + res.status);
             var data = await res.json();
-            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            if (!state.summaries) state.summaries = [];
             state.summaries.push({ timestamp: Date.now(), text: text });
-            saveState(); refreshSummary(); toast('总结已生成');
+            saveToMetadata();
+            refreshSummary();
+            toast("总结已生成。");
         } catch (e) {
-            toast('失败: ' + e.message);
+            toast("总结失败: " + e.message);
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
-    // ═══════════════════════════════════════
-    // ★ openPanel：严格 max 框架写法
-    // ═══════════════════════════════════════
-    function openPanel() {
+    async function fetchModelList() {
+        var apiUrl = (state.settings.apiUrl || "").trim();
+        var apiKey = (state.settings.apiKey || "").trim();
+        if (!apiUrl) { toast("请先设置 API 地址。"); return; }
+        toast("正在拉取模型列表…");
         try {
-            loadState();
-
-            var exist = document.getElementById('tlg-panel');
-            if (exist) {
-                exist.style.display = 'flex';
-                document.body.setAttribute('data-tlg-lock', '1');
-                document.body.style.overflow = 'hidden';
-                setTimeout(renderCanvas, 60);
-                return;
-            }
-
-            var panel = document.createElement('div');
-            panel.id = 'tlg-panel';
-            // 关键：只设 display，其余交给 style.css（和 max 一样）
-            // 但补一条 inline background，防止主题把背景冲掉
-            panel.style.display = 'flex';
-            panel.style.background = '#050508';
-
-            panel.innerHTML =
-                '<div id="tlg-tabs">' +
-                '<div class="tlg-tab active" data-tab="tree">因果树</div>' +
-                '<div class="tlg-tab" data-tab="archive">档案库</div>' +
-                '<div class="tlg-tab" data-tab="summary">总结池</div>' +
-                '<div class="tlg-tab" data-tab="engine">引擎设置</div>' +
-                '<div id="tlg-close">✕</div>' +
-                '</div>' +
-                '<div id="tlg-body">' +
-                // tree
-                '<div class="tlg-view active" data-view="tree" style="flex-direction:column">' +
-                '<div id="tlg-canvas-wrap" style="flex:1;position:relative;min-height:0">' +
-                '<canvas id="tlg-tree-canvas"></canvas>' +
-                '<div id="tlg-canvas-toolbar">' +
-                '<button type="button" class="tlg-btn" id="tlg-btn-anchor">⚓ 在此锚定</button>' +
-                '<button type="button" class="tlg-btn" id="tlg-btn-reset">重置视图</button>' +
-                '</div></div>' +
-                '<div id="tlg-brief-panel">' +
-                '<div id="tlg-brief-header"><span id="tlg-brief-title">节点</span>' +
-                '<button type="button" class="tlg-btn" id="tlg-brief-close">✕</button></div>' +
-                '<div id="tlg-brief-body"></div><div id="tlg-brief-footer"></div></div></div>' +
-                // archive
-                '<div class="tlg-view" data-view="archive"><div class="tlg-scroll">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
-                '<div style="font-weight:600;color:#e8e8f0">全部节点</div>' +
-                '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new">⚓ 新建锚定</button></div>' +
-                '<div id="tlg-archive-list"></div></div></div>' +
-                // summary
-                '<div class="tlg-view" data-view="summary"><div class="tlg-scroll">' +
-                '<div style="background:#0a0a10;border:1px solid #1a1a28;border-radius:6px;padding:12px;margin-bottom:12px">' +
-                '<div style="font-weight:600;color:#e8e8f0;margin-bottom:8px">总结设置</div>' +
-                '<div style="margin-bottom:8px;font-size:13px">每 <input id="tlg-auto-interval" type="number" min="1" value="' + (state.settings.autoInterval || 10) + '" style="width:60px;padding:4px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px"> 轮提醒</div>' +
-                '<div style="margin-bottom:8px;font-size:13px">跳转后显示最后 <input id="tlg-last-n" type="number" min="1" value="' + (state.settings.lastNMessages || 5) + '" style="width:60px;padding:4px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px"> 条</div>' +
-                '<textarea id="tlg-summary-prompt" style="width:100%;min-height:100px;padding:10px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px;font-size:14px;box-sizing:border-box">' + escHtml(state.settings.summaryPrompt || '') + '</textarea>' +
-                '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;width:100%;padding:10px">▶ 立即生成总结</button></div>' +
-                '<div id="tlg-summary-list"></div></div></div>' +
-                // engine
-                '<div class="tlg-view" data-view="engine"><div class="tlg-scroll">' +
-                '<div style="background:#0a0a10;border:1px solid #1a1a28;border-radius:6px;padding:12px">' +
-                '<div style="font-weight:600;color:#e8e8f0;margin-bottom:10px">API 配置</div>' +
-                '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px">API 地址</div>' +
-                '<input id="tlg-api-url" value="' + escHtml(state.settings.apiUrl || '') + '" style="width:100%;padding:10px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px;font-size:16px;box-sizing:border-box;margin-bottom:10px">' +
-                '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px">API 密钥</div>' +
-                '<input id="tlg-api-key" type="password" value="' + escHtml(state.settings.apiKey || '') + '" style="width:100%;padding:10px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px;font-size:16px;box-sizing:border-box;margin-bottom:10px">' +
-                '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px">模型名</div>' +
-                '<input id="tlg-model-manual" value="' + escHtml(state.settings.model || '') + '" style="width:100%;padding:10px;background:#0e0e18;border:1px solid #1a1a28;color:#c0c0c8;border-radius:4px;font-size:16px;box-sizing:border-box;margin-bottom:12px">' +
-                '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%;padding:12px">保存引擎设置</button>' +
-                '</div></div></div>' +
-                '</div>';
-
-            document.body.appendChild(panel);
-            document.body.setAttribute('data-tlg-lock', '1');
-            document.body.style.overflow = 'hidden';
-
-            document.getElementById('tlg-close').onclick = closePanel;
-
-            var tabs = panel.querySelectorAll('.tlg-tab');
-            for (var i = 0; i < tabs.length; i++) {
-                tabs[i].addEventListener('click', function () {
-                    switchTab(this.getAttribute('data-tab'));
-                });
-            }
-
-            document.getElementById('tlg-btn-anchor').onclick = function () { showAnchorModal(); };
-            document.getElementById('tlg-btn-reset').onclick = function () {
-                camX = 0; camY = 0; camZoom = 1; renderCanvas();
-            };
-            document.getElementById('tlg-brief-close').onclick = closeBriefPanel;
-            document.getElementById('tlg-archive-new').onclick = function () { showAnchorModal(); };
-            document.getElementById('tlg-summary-run').onclick = runSummary;
-            document.getElementById('tlg-engine-save').onclick = function () {
-                state.settings.apiUrl = document.getElementById('tlg-api-url').value.trim();
-                state.settings.apiKey = document.getElementById('tlg-api-key').value.trim();
-                state.settings.model = document.getElementById('tlg-model-manual').value.trim();
-                state.settings.autoInterval = Math.max(1, parseInt(document.getElementById('tlg-auto-interval').value, 10) || 10);
-                state.settings.lastNMessages = Math.max(1, parseInt(document.getElementById('tlg-last-n').value, 10) || 5);
-                state.settings.summaryPrompt = document.getElementById('tlg-summary-prompt').value;
-                saveState();
-                toast('引擎设置已保存');
-            };
-
-            initCanvas();
-            setTimeout(renderCanvas, 60);
-            console.log('[TLG] 面板已打开');
-        } catch (err) {
-            console.error('[TLG] openPanel 错误', err);
-            toast('打开失败: ' + err.message);
+            var res = await fetch(buildEndpoint(apiUrl, "/models"), {
+                headers: apiKey ? { Authorization: "Bearer " + apiKey } : {}
+            });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            var data = await res.json();
+            var models = (data.data || data.models || []).map(function (m) {
+                return typeof m === "string" ? m : (m.id || m.name || "");
+            }).filter(Boolean);
+            state.settings.modelList = models;
+            saveToMetadata();
+            populateModelSelect();
+            toast("已加载 " + models.length + " 个模型。");
+        } catch (e) {
+            toast("拉取模型失败: " + e.message);
         }
+    }
+
+    function populateModelSelect() {
+        var sel = document.getElementById("tlg-model-select");
+        if (!sel) return;
+        var list = state.settings.modelList || [];
+        sel.innerHTML = '<option value="">-- 选择模型 --</option>' +
+            list.map(function (m) {
+                return '<option value="' + escHtml(m) + '"' +
+                    (m === state.settings.model ? " selected" : "") + ">" + escHtml(m) + "</option>";
+            }).join("");
+    }
+
+    // ── ★ 打开面板：完全对齐能用的框架 ──
+    function ensurePanelBuilt() {
+        if (document.getElementById("tlg-panel")) return;
+
+        var s = state.settings || {};
+        var panel = document.createElement("div");
+        panel.id = "tlg-panel";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#050508;color:#c0c0c8;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
+        panel.innerHTML =
+            '<div id="tlg-tabs">' +
+            '<div class="tlg-tab active" data-tab="tree">因果树</div>' +
+            '<div class="tlg-tab" data-tab="archive">档案库</div>' +
+            '<div class="tlg-tab" data-tab="summary">总结池</div>' +
+            '<div class="tlg-tab" data-tab="engine">引擎设置</div>' +
+            '<div id="tlg-close">✕</div></div>' +
+            '<div id="tlg-body">' +
+            // tree
+            '<div class="tlg-view active" id="tlg-view-tree" data-view="tree">' +
+            '<div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas>' +
+            '<div id="tlg-canvas-toolbar">' +
+            '<button type="button" class="tlg-btn" id="tlg-canvas-anchor">⚓ 在此锚定</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-canvas-reset-view">重置视图</button></div></div>' +
+            '<div id="tlg-brief-panel">' +
+            '<div class="tlg-brief-header"><span>节点</span>' +
+            '<button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px">✕</button></div>' +
+            '<div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
+            // archive
+            '<div class="tlg-view" data-view="archive">' +
+            '<div class="tlg-scroll-panel">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">' +
+            '<div style="font-size:15px;font-weight:600;color:var(--tlg-silver-bright)">全部节点</div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new">⚓ 新建锚定</button></div>' +
+            '<div id="tlg-archive-list"></div></div></div>' +
+            // summary
+            '<div class="tlg-view" data-view="summary">' +
+            '<div class="tlg-scroll-panel">' +
+            '<div class="tlg-section"><div class="tlg-section-title">自动总结模式</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式</span>' +
+            '<div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">每 ' +
+            '<input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) +
+            '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 轮提醒</label></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳转后显示最后 ' +
+            '<input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) +
+            '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条消息</label></div></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">总结提示词</div>' +
+            '<label class="tlg-label">提示词模板（{{context}}）</label>' +
+            '<textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + "</textarea>" +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px">▶ 立即生成总结</button></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">总结历史</div><div id="tlg-summary-list"></div></div></div></div>' +
+            // engine
+            '<div class="tlg-view" data-view="engine">' +
+            '<div class="tlg-scroll-panel">' +
+            '<div class="tlg-section"><div class="tlg-section-title">API 配置</div>' +
+            '<label class="tlg-label">API 基础地址</label><div class="tlg-row">' +
+            '<input class="tlg-input" id="tlg-api-url" value="' + escHtml(s.apiUrl || "") + '" />' +
+            '<button type="button" class="tlg-btn" id="tlg-test-api">测试</button></div>' +
+            '<label class="tlg-label">API 密钥</label>' +
+            '<input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:12px" />' +
+            '<label class="tlg-label">模型</label><div class="tlg-row">' +
+            '<select class="tlg-select" id="tlg-model-select" style="flex:1"></select>' +
+            '<button type="button" class="tlg-btn" id="tlg-fetch-models">拉取列表</button></div>' +
+            '<label class="tlg-label">或手动输入模型名称</label>' +
+            '<input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">向量 API（可选）</div>' +
+            '<label class="tlg-label">向量 API 地址</label>' +
+            '<input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">向量 API 密钥</label>' +
+            '<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">检索提示词模板</label>' +
+            '<textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + "</textarea></div>" +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important">保存引擎设置</button>' +
+            "</div></div></div>";
+
+        document.body.appendChild(panel);
+        bindPanelEvents(panel);
+    }
+
+    function openPanel() {
+        if (!isEnabled()) {
+            toast("河岸凝视已关闭，请到「扩展」设置中开启。");
+            return;
+        }
+        loadFromMetadata();
+        ensurePanelBuilt();
+        var panel = document.getElementById("tlg-panel");
+        if (!panel) return;
+        // ★ 和能用框架完全一样
+        panel.style.display = "flex";
+        document.body.style.overflow = "hidden";
+        setTimeout(function () { renderCanvas(); }, 80);
     }
 
     function closePanel() {
-        var panel = document.getElementById('tlg-panel');
-        if (panel) panel.style.display = 'none';
-        if (document.body.getAttribute('data-tlg-lock') === '1') {
-            document.body.style.overflow = '';
-            document.body.removeAttribute('data-tlg-lock');
-        }
-        closeModal();
+        var panel = document.getElementById("tlg-panel");
+        if (panel) panel.style.display = "none";
+        document.body.style.overflow = "";
     }
 
     function switchTab(name) {
-        var panel = document.getElementById('tlg-panel');
+        var panel = document.getElementById("tlg-panel");
         if (!panel) return;
-        var tabs = panel.querySelectorAll('.tlg-tab');
-        for (var i = 0; i < tabs.length; i++) {
-            if (tabs[i].getAttribute('data-tab') === name) tabs[i].classList.add('active');
-            else tabs[i].classList.remove('active');
-        }
-        var views = panel.querySelectorAll('.tlg-view');
-        for (var j = 0; j < views.length; j++) {
-            if (views[j].getAttribute('data-view') === name) {
-                views[j].classList.add('active');
-                views[j].style.display = 'flex';
-            } else {
-                views[j].classList.remove('active');
-                views[j].style.display = 'none';
-            }
-        }
-        if (name === 'tree') setTimeout(renderCanvas, 50);
-        else if (name === 'archive') refreshArchive();
-        else if (name === 'summary') refreshSummary();
+        panel.querySelectorAll(".tlg-tab").forEach(function (t) {
+            t.classList.toggle("active", t.getAttribute("data-tab") === name);
+        });
+        panel.querySelectorAll(".tlg-view").forEach(function (v) {
+            var on = v.getAttribute("data-view") === name;
+            v.classList.toggle("active", on);
+            // 兼容旧写法
+            if (!on) v.style.display = "none";
+            else v.style.display = "flex";
+        });
+        if (name === "tree") setTimeout(function () { renderCanvas(); }, 50);
+        else if (name === "archive") refreshArchive();
+        else if (name === "summary") refreshSummary();
+        else if (name === "engine") populateModelSelect();
     }
 
-    function initCanvas() {
-        var wrap = document.getElementById('tlg-canvas-wrap');
-        tlgCanvas = document.getElementById('tlg-tree-canvas');
-        if (!wrap || !tlgCanvas) return;
-        tlgCtx = tlgCanvas.getContext('2d');
-        if (typeof ResizeObserver !== 'undefined') {
+    function bindPanelEvents(panel) {
+        document.getElementById("tlg-close").onclick = function () { closePanel(); };
+
+        panel.querySelectorAll(".tlg-tab").forEach(function (tab) {
+            tab.onclick = function () { switchTab(tab.getAttribute("data-tab")); };
+        });
+
+        document.getElementById("tlg-brief-close").onclick = function () { closeBriefPanel(); };
+        document.getElementById("tlg-canvas-anchor").onclick = function () { showAnchorModal(); };
+        document.getElementById("tlg-canvas-reset-view").onclick = function () {
+            camX = 0; camY = 0; camZoom = 1; renderCanvas();
+        };
+        document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
+
+        document.getElementById("tlg-auto-toggle").onclick = function () {
+            state.settings.autoMode = !state.settings.autoMode;
+            this.classList.toggle("on", state.settings.autoMode);
+            saveToMetadata();
+        };
+        document.getElementById("tlg-auto-interval").onchange = function () {
+            state.settings.autoInterval = Math.max(1, parseInt(this.value, 10) || 10);
+            saveToMetadata();
+        };
+        document.getElementById("tlg-last-n").onchange = function () {
+            state.settings.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5);
+            saveToMetadata();
+        };
+        document.getElementById("tlg-summary-prompt").onchange = function () {
+            state.settings.summaryPrompt = this.value;
+            saveToMetadata();
+        };
+        document.getElementById("tlg-summary-run").onclick = function () { runSummary(); };
+
+        document.getElementById("tlg-engine-save").onclick = function () {
+            state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
+            state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
+            state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
+            state.settings.vectorKey = document.getElementById("tlg-vec-key").value.trim();
+            state.settings.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
+            var manual = document.getElementById("tlg-model-manual").value.trim();
+            var sel = document.getElementById("tlg-model-select").value;
+            state.settings.model = manual || sel;
+            saveToMetadata();
+            toast("引擎设置已保存。");
+        };
+        document.getElementById("tlg-fetch-models").onclick = function () { fetchModelList(); };
+        document.getElementById("tlg-model-select").onchange = function () {
+            if (this.value) document.getElementById("tlg-model-manual").value = this.value;
+        };
+        document.getElementById("tlg-test-api").onclick = async function () {
+            var url = document.getElementById("tlg-api-url").value.trim();
+            var key = document.getElementById("tlg-api-key").value.trim();
+            if (!url) { toast("请先输入地址。"); return; }
+            toast("正在测试…");
+            try {
+                var res = await fetch(buildEndpoint(url, "/models"), {
+                    headers: key ? { Authorization: "Bearer " + key } : {}
+                });
+                toast(res.ok ? "✓ API 可达。" : ("✗ HTTP " + res.status));
+            } catch (e) { toast("✗ " + e.message); }
+        };
+
+        initCanvasEvents();
+    }
+
+    function initCanvasEvents() {
+        var wrap = document.getElementById("tlg-canvas-wrap");
+        if (!wrap) return;
+        canvas = document.getElementById("tlg-tree-canvas");
+        ctx = canvas.getContext("2d");
+        if (typeof ResizeObserver !== "undefined") {
             new ResizeObserver(function () { renderCanvas(); }).observe(wrap);
         }
 
-        tlgCanvas.addEventListener('mousedown', function (e) {
+        canvas.addEventListener("mousedown", function (e) {
             if (e.button !== 0) return;
-            var hit = hitTest(e.clientX, e.clientY);
+            var hit = canvasHitTest(e.clientX, e.clientY);
             if (hit) { openBriefPanel(hit); return; }
             isPanning = true;
             panStartX = e.clientX - camX;
             panStartY = e.clientY - camY;
         });
-        tlgCanvas.addEventListener('mousemove', function (e) {
+        canvas.addEventListener("mousemove", function (e) {
             if (!isPanning) return;
             camX = e.clientX - panStartX;
             camY = e.clientY - panStartY;
             renderCanvas();
         });
-        tlgCanvas.addEventListener('mouseup', function () { isPanning = false; });
-        tlgCanvas.addEventListener('mouseleave', function () { isPanning = false; });
-        tlgCanvas.addEventListener('wheel', function (e) {
+        function endPan() { isPanning = false; }
+        canvas.addEventListener("mouseup", endPan);
+        canvas.addEventListener("mouseleave", endPan);
+        canvas.addEventListener("wheel", function (e) {
             e.preventDefault();
             camZoom = Math.max(0.2, Math.min(4, camZoom * (e.deltaY < 0 ? 1.1 : 0.91)));
             renderCanvas();
         }, { passive: false });
 
-        var ltd = 0, tsh = null, tm = false;
-        tlgCanvas.addEventListener('touchstart', function (e) {
-            tm = false;
+        var lastTouchDist = 0, touchStartHit = null, touchMoved = false;
+        canvas.addEventListener("touchstart", function (e) {
+            touchMoved = false;
             if (e.touches.length === 1) {
                 isPanning = true;
                 panStartX = e.touches[0].clientX - camX;
                 panStartY = e.touches[0].clientY - camY;
-                tsh = hitTest(e.touches[0].clientX, e.touches[0].clientY);
+                touchStartHit = canvasHitTest(e.touches[0].clientX, e.touches[0].clientY);
             } else if (e.touches.length === 2) {
                 isPanning = false;
-                ltd = Math.hypot(
+                lastTouchDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
             }
         }, { passive: true });
-        tlgCanvas.addEventListener('touchmove', function (e) {
-            tm = true;
+        canvas.addEventListener("touchmove", function (e) {
+            touchMoved = true;
             if (e.touches.length === 1 && isPanning) {
                 camX = e.touches[0].clientX - panStartX;
                 camY = e.touches[0].clientY - panStartY;
                 renderCanvas();
             } else if (e.touches.length === 2) {
-                var d = Math.hypot(
+                var dist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
-                if (ltd > 0) {
-                    camZoom = Math.max(0.2, Math.min(4, camZoom * (d / ltd)));
+                if (lastTouchDist > 0) {
+                    camZoom = Math.max(0.2, Math.min(4, camZoom * (dist / lastTouchDist)));
                     renderCanvas();
                 }
-                ltd = d;
+                lastTouchDist = dist;
             }
         }, { passive: true });
-        tlgCanvas.addEventListener('touchend', function () {
-            if (!tm && tsh) openBriefPanel(tsh);
+        canvas.addEventListener("touchend", function () {
+            if (!touchMoved && touchStartHit) openBriefPanel(touchStartHit);
             isPanning = false;
-            tsh = null;
+            touchStartHit = null;
         }, { passive: true });
     }
 
     // ── 入口 ──
-    function injectButton() {
-        var menu = document.getElementById('extensionsMenu');
+    function injectMenuButton() {
+        if (!isEnabled()) {
+            var old = document.getElementById("tlg-menu-btn");
+            if (old) old.remove();
+            return;
+        }
+        var menu = document.getElementById("extensionsMenu");
         if (!menu) return;
-        if (document.getElementById('tlg-menu-btn')) return;
-        var btn = document.createElement('div');
-        btn.id = 'tlg-menu-btn';
-        btn.className = 'list-group-item flex-container flexGap5 interactable';
-        btn.style.cursor = 'pointer';
+        if (document.getElementById("tlg-menu-btn")) return;
+
+        var btn = document.createElement("div");
+        btn.id = "tlg-menu-btn";
+        btn.className = "list-group-item flex-container flexGap5 interactable";
+        btn.style.cursor = "pointer";
         btn.innerHTML = '<i class="fa-solid fa-water"></i><span>河岸凝视</span>';
-        btn.addEventListener('click', function (e) {
+        btn.addEventListener("click", function (e) {
             e.preventDefault();
             e.stopPropagation();
-            var p = document.getElementById('tlg-panel');
-            if (p && p.style.display === 'flex') closePanel();
+            var p = document.getElementById("tlg-panel");
+            if (p && p.style.display === "flex") closePanel();
             else openPanel();
         });
         menu.appendChild(btn);
-        console.log('[TLG] 按钮已注入');
     }
 
     function injectSettingsPanel() {
-        if (document.getElementById('tlg_settings_block')) return;
-        var host = document.querySelector('#extensions_settings2') ||
-            document.querySelector('#extensions_settings') ||
-            document.querySelector('#extensions_settings1');
+        if (document.getElementById("tlg_settings_block")) return;
+        var host =
+            document.querySelector("#extensions_settings2") ||
+            document.querySelector("#extensions_settings") ||
+            document.querySelector("#extensions_settings1");
         if (!host) return;
 
-        var block = document.createElement('div');
-        block.id = 'tlg_settings_block';
-        block.className = 'extension_container';
+        var enabled = isEnabled();
+        var block = document.createElement("div");
+        block.id = "tlg_settings_block";
+        block.className = "extension_container";
         block.innerHTML =
             '<div class="inline-drawer">' +
-            '<div class="inline-drawer-toggle inline-drawer-header"><b>🌊 河岸凝视</b>' +
+            '<div class="inline-drawer-toggle inline-drawer-header">' +
+            "<b>🌊 河岸凝视</b>" +
             '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>' +
             '<div class="inline-drawer-content">' +
-            '<div style="font-size:12px;opacity:.75;margin:8px 0">因果时间线管理 · 数据存于当前聊天</div>' +
-            '<button type="button" id="tlg_settings_open">打开河岸凝视面板</button>' +
-            '<div style="font-size:11px;opacity:.55;margin-top:10px">斜杠命令：/tlg_anchor</div>' +
-            '</div></div>';
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;">' +
+            "<span>启用插件</span>" +
+            '<div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div>' +
+            '<div style="font-size:12px;opacity:.75;margin-bottom:10px;">关闭后隐藏菜单入口并停止全屏面板。</div>' +
+            // ★ 不用 menu_button，避免竖排
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open">打开河岸凝视面板</button>' +
+            '<div style="font-size:11px;opacity:.55;margin-top:10px;">斜杠命令：/tlg_anchor</div>' +
+            "</div></div>";
         host.appendChild(block);
-        document.getElementById('tlg_settings_open').onclick = function () { openPanel(); };
+
+        document.getElementById("tlg_enable_toggle").onclick = function () {
+            var next = !this.classList.contains("on");
+            this.classList.toggle("on", next);
+            setEnabled(next);
+            toast(next ? "河岸凝视已启用" : "河岸凝视已关闭");
+        };
+        document.getElementById("tlg_settings_open").onclick = function () { openPanel(); };
     }
 
-    function registerSlash() {
+    function registerSlashCommand() {
+        function wrap(value) {
+            if (!isEnabled()) { toast("河岸凝视已关闭。"); return ""; }
+            loadFromMetadata();
+            showAnchorModal(String(value || ""));
+            return "";
+        }
+        var st = getST();
+        if (st && st.registerSlashCommand) {
+            st.registerSlashCommand("tlg_anchor", function (a, v) { return wrap(v); }, [], "创建河岸凝视锚定点", true, true);
+        }
+        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
+            try {
+                window.SillyTavern.SlashCommandParser.addCommandObject(
+                    window.SillyTavern.SlashCommand.fromProps({
+                        name: "tlg_anchor",
+                        callback: function (a, v) { return wrap(v); },
+                        helpString: "创建河岸凝视因果锚定点。"
+                    })
+                );
+            } catch (e) {}
+        }
+    }
+
+    function boot() {
+        injectMenuButton();
+        injectSettingsPanel();
+        new MutationObserver(function () {
+            injectMenuButton();
+            injectSettingsPanel();
+        }).observe(document.body, { childList: true, subtree: true });
+        setInterval(injectMenuButton, 2000);
+        registerSlashCommand();
+
         try {
-            var ctx = getCtx();
-            if (ctx && ctx.registerSlashCommand) {
-                ctx.registerSlashCommand('tlg_anchor', function (a, v) {
-                    loadState();
-                    showAnchorModal(String(v || ''));
-                    return '';
-                }, [], '创建河岸凝视锚定点', true, true);
+            var ctx0 = getST();
+            if (ctx0 && ctx0.eventSource && ctx0.eventTypes) {
+                ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
+                    closePanel();
+                });
             }
         } catch (e) {}
+
+        console.log("[TLG] 河岸凝视 v2.2 已加载（#tlg-panel 方案）");
     }
 
-    // boot
-    cleanupLeftovers();
-    injectButton();
-    injectSettingsPanel();
-    new MutationObserver(function () {
-        injectButton();
-        injectSettingsPanel();
-    }).observe(document.body, { childList: true, subtree: true });
-    setInterval(injectButton, 2000);
-    registerSlash();
-
-    try {
-        var ctx0 = getCtx();
-        if (ctx0 && ctx0.eventSource && ctx0.eventTypes) {
-            ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
-                closePanel();
-            });
-        }
-    } catch (e) {}
-
-    console.log('[TLG] 河岸凝视 v2.4 已加载');
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", boot);
+    } else {
+        setTimeout(boot, 300);
+    }
 })();
