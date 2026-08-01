@@ -1,6 +1,6 @@
 /**
- * 河岸凝视 v2.2
- * 打开方式对齐已验证的移动端框架：#tlg-panel + display:flex/none
+ * 河岸凝视 v2.3
+ * 修复：按钮反馈 / API兼容 / async移除 / 弹窗居中 / 数据持久化
  */
 (function () {
     "use strict";
@@ -45,17 +45,26 @@
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
 
+    // ── Toast（内联样式，不依赖CSS）──
     function toast(msg, duration) {
         duration = duration || 2800;
         var el = document.createElement("div");
-        el.className = "tlg-toast";
         el.textContent = msg;
+        el.style.cssText = "position:fixed;left:50%;bottom:30px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#0a0a10;border:1px solid #2a2a3a;border-radius:8px;color:#c0c0c8;font-size:13px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;";
         document.body.appendChild(el);
         setTimeout(function () {
             el.style.opacity = "0";
-            el.style.transition = "opacity 0.4s";
             setTimeout(function () { el.remove(); }, 400);
         }, duration);
+    }
+
+    // ── 按钮点击光效 ──
+    function flashBtn(btn) {
+        if (!btn) return;
+        var orig = btn.style.boxShadow || "";
+        btn.style.boxShadow = "0 0 12px 2px rgba(192,192,210,0.6)";
+        btn.style.transition = "box-shadow 0.3s";
+        setTimeout(function () { btn.style.boxShadow = orig; }, 800);
     }
 
     function escHtml(str) {
@@ -98,7 +107,6 @@
         st.chat_metadata[METADATA_KEY] = JSON.parse(JSON.stringify(state));
         if (typeof st.saveMetadata === "function") st.saveMetadata();
         else if (typeof window.saveMetadataDebounced === "function") window.saveMetadataDebounced();
-        
         // ★ 备份到 localStorage
         try {
             var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "unknown";
@@ -106,8 +114,7 @@
         } catch (e) { console.warn("[TLG] localStorage backup failed:", e); }
     }
 
-
-        function loadFromMetadata() {
+    function loadFromMetadata() {
         var st = getST();
         if (!st) return;
         var saved = st.chat_metadata && st.chat_metadata[METADATA_KEY];
@@ -116,14 +123,14 @@
             if (!state.settings) state.settings = {};
             if (state._lastChatLen == null) state._lastChatLen = 0;
         } else {
-            // ★ chat_metadata 没有数据时，尝试从 localStorage 恢复
+            // ★ 尝试从 localStorage 恢复
             try {
                 var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "";
                 var backup = chatId && localStorage.getItem("tlg_backup_" + chatId);
                 if (backup) {
                     state = JSON.parse(backup);
                     toast("已从本地备份恢复时间线数据。");
-                    saveToMetadata(); // 写回 chat_metadata
+                    saveToMetadata();
                     return;
                 }
             } catch (e) {}
@@ -263,7 +270,7 @@
         var backdrop = document.createElement("div");
         backdrop.className = "tlg-modal-backdrop";
         backdrop.id = "tlg-anchor-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:25vh;padding-left:16px;padding-right:16px;padding-bottom:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
         backdrop.innerHTML =
             '<div class="tlg-modal">' +
             '<div class="tlg-modal-title">⚓ 创建锚定点</div>' +
@@ -278,6 +285,18 @@
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">⚓ 确认锚定</button>' +
             "</div></div>";
         document.body.appendChild(backdrop);
+
+        // ★ 动态检查：弹窗比屏幕高时改为顶对齐
+        setTimeout(function () {
+            var modal = backdrop.querySelector(".tlg-modal");
+            if (!modal) return;
+            var vh = window.innerHeight || document.documentElement.clientHeight;
+            var mh = modal.offsetHeight || 300;
+            if (mh >= vh - 32) {
+                backdrop.style.alignItems = "flex-start";
+                backdrop.style.paddingTop = "16px";
+            }
+        }, 30);
 
         var nameInput = backdrop.querySelector("#tlg-anc-name");
         backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
@@ -442,16 +461,17 @@
         panel.querySelector(".tlg-brief-header span").textContent = node.name;
         var body = panel.querySelector(".tlg-brief-body");
         body.innerHTML =
-            '<div style="margin-bottom:8px;font-size:11px;color:var(--tlg-silver-dim)">' +
+            '<div style="margin-bottom:8px;font-size:11px;color:#6a6a78">' +
             new Date(node.timestamp).toLocaleString() + "</div>" +
-            '<div style="margin-bottom:8px;font-size:11px;color:var(--tlg-silver-dim)">' +
+            '<div style="margin-bottom:8px;font-size:11px;color:#6a6a78">' +
             "消息索引: " + node.msgIdx + " | " + (node.statData ? "MVU快照 ✓" : "无MVU快照") + "</div>" +
             '<div style="white-space:pre-wrap;word-break:break-word">' +
-            (node.brief ? escHtml(node.brief) : "<em style='color:var(--tlg-silver-dim)'>暂无描述。</em>") + "</div>" +
+            (node.brief ? escHtml(node.brief) : "<em style='color:#6a6a78'>暂无描述。</em>") + "</div>" +
             '<div style="margin-top:12px"><label class="tlg-label">编辑描述</label>' +
             '<textarea class="tlg-textarea" id="tlg-brief-edit" style="min-height:100px">' + escHtml(node.brief || "") + "</textarea>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%!important">保存描述</button></div>';
         body.querySelector("#tlg-brief-save").onclick = function () {
+            flashBtn(this);
             node.brief = body.querySelector("#tlg-brief-edit").value;
             saveToMetadata();
             toast("描述已保存。");
@@ -474,7 +494,7 @@
         var container = document.getElementById("tlg-archive-list");
         if (!container) return;
         if (!state.nodes.length) {
-            container.innerHTML = '<div style="color:var(--tlg-silver-dim);padding:20px">暂无节点。</div>';
+            container.innerHTML = '<div style="color:#6a6a78;padding:20px">暂无节点。</div>';
             return;
         }
         var sorted = state.nodes.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
@@ -483,7 +503,7 @@
             return (
                 '<div class="tlg-archive-card ' + (isCurrent ? "current" : "") + '">' +
                 '<div class="tlg-archive-title">' + escHtml(node.name) +
-                (isCurrent ? " <span style='color:var(--tlg-silver-dim);font-size:11px'>(当前)</span>" : "") +
+                (isCurrent ? " <span style='color:#6a6a78;font-size:11px'>(当前)</span>" : "") +
                 "</div>" +
                 '<div class="tlg-archive-meta">' + new Date(node.timestamp).toLocaleString() +
                 " · 消息 " + node.msgIdx + "</div>" +
@@ -535,14 +555,14 @@
         var list = document.getElementById("tlg-summary-list");
         if (!list) return;
         if (!state.summaries || !state.summaries.length) {
-            list.innerHTML = '<div style="color:var(--tlg-silver-dim)">暂无总结记录。</div>';
+            list.innerHTML = '<div style="color:#6a6a78">暂无总结记录。</div>';
             return;
         }
         list.innerHTML = state.summaries.slice().reverse().map(function (s, i) {
             var idx = state.summaries.length - 1 - i;
             return (
                 '<div class="tlg-section">' +
-                '<div style="font-size:11px;color:var(--tlg-silver-dim);margin-bottom:6px">' +
+                '<div style="font-size:11px;color:#6a6a78;margin-bottom:6px">' +
                 new Date(s.timestamp).toLocaleString() + "</div>" +
                 '<div style="font-size:13px;white-space:pre-wrap">' + escHtml(s.text) + "</div>" +
                 '<button type="button" class="tlg-btn tlg-btn-danger" style="margin-top:8px;font-size:11px" data-idx="' + idx + '">删除</button></div>'
@@ -557,14 +577,19 @@
         });
     }
 
+    // ── API端点（参考桌宠逻辑）──
     function buildEndpoint(base, path) {
-        var url = (base || "").trim();
-        if (!/\/v\d/.test(url) && !url.endsWith("/")) url += "/v1";
-        else if (url.endsWith("/")) url = url.slice(0, -1);
+        var url = (base || "").trim().replace(/\/+$/, "");
+        // 如果已经包含完整路径就直接用
+        if (path === "/chat/completions" && /\/chat\/completions$/.test(url)) return url;
+        if (path === "/models" && /\/models$/.test(url)) return url;
+        // 自动补 /v1
+        if (!/\/v\d+/.test(url)) url += "/v1";
         return url + path;
     }
 
-    async function runSummary() {
+    // ── 总结（.then链，无async）──
+    function runSummary() {
         var apiUrl = (state.settings.apiUrl || "").trim();
         var apiKey = (state.settings.apiKey || "").trim();
         var model = (state.settings.model || "").trim();
@@ -575,47 +600,50 @@
         }).join("\n");
         var prompt = (state.settings.summaryPrompt || "").replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run");
-        if (btn) btn.disabled = true;
+        if (btn) { btn.disabled = true; flashBtn(btn); }
         toast("正在生成总结…");
-        try {
-            var res = await fetch(buildEndpoint(apiUrl, "/chat/completions"), {
-                method: "POST",
-                headers: Object.assign(
-                    { "Content-Type": "application/json" },
-                    apiKey ? { Authorization: "Bearer " + apiKey } : {}
-                ),
-                body: JSON.stringify({
-                    model: model || undefined,
-                    messages: [{ role: "user", content: prompt }],
-                    max_tokens: 512
-                })
-            });
+        fetch(buildEndpoint(apiUrl, "/chat/completions"), {
+            method: "POST",
+            headers: Object.assign(
+                { "Content-Type": "application/json" },
+                apiKey ? { Authorization: "Bearer " + apiKey } : {}
+            ),
+            body: JSON.stringify({
+                model: model || undefined,
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 512
+            })
+        }).then(function (res) {
             if (!res.ok) throw new Error("HTTP " + res.status);
-            var data = await res.json();
+            return res.json();
+        }).then(function (data) {
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
             if (!state.summaries) state.summaries = [];
             state.summaries.push({ timestamp: Date.now(), text: text });
             saveToMetadata();
             refreshSummary();
             toast("总结已生成。");
-        } catch (e) {
+        }).catch(function (e) {
             toast("总结失败: " + e.message);
-        } finally {
+        }).then(function () {
             if (btn) btn.disabled = false;
-        }
+        });
     }
 
-    async function fetchModelList() {
+    // ── 拉取模型（.then链，无async）──
+    function fetchModelList() {
         var apiUrl = (state.settings.apiUrl || "").trim();
         var apiKey = (state.settings.apiKey || "").trim();
         if (!apiUrl) { toast("请先设置 API 地址。"); return; }
+        var btn = document.getElementById("tlg-fetch-models");
+        if (btn) { btn.disabled = true; flashBtn(btn); }
         toast("正在拉取模型列表…");
-        try {
-            var res = await fetch(buildEndpoint(apiUrl, "/models"), {
-                headers: apiKey ? { Authorization: "Bearer " + apiKey } : {}
-            });
+        fetch(buildEndpoint(apiUrl, "/models"), {
+            headers: apiKey ? { Authorization: "Bearer " + apiKey } : {}
+        }).then(function (res) {
             if (!res.ok) throw new Error("HTTP " + res.status);
-            var data = await res.json();
+            return res.json();
+        }).then(function (data) {
             var models = (data.data || data.models || []).map(function (m) {
                 return typeof m === "string" ? m : (m.id || m.name || "");
             }).filter(Boolean);
@@ -623,9 +651,11 @@
             saveToMetadata();
             populateModelSelect();
             toast("已加载 " + models.length + " 个模型。");
-        } catch (e) {
+        }).catch(function (e) {
             toast("拉取模型失败: " + e.message);
-        }
+        }).then(function () {
+            if (btn) btn.disabled = false;
+        });
     }
 
     function populateModelSelect() {
@@ -639,7 +669,7 @@
             }).join("");
     }
 
-    // ── ★ 打开面板：完全对齐能用的框架 ──
+    // ── ★ 打开面板 ──
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return;
 
@@ -669,7 +699,7 @@
             '<div class="tlg-view" data-view="archive">' +
             '<div class="tlg-scroll-panel">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">' +
-            '<div style="font-size:15px;font-weight:600;color:var(--tlg-silver-bright)">全部节点</div>' +
+            '<div style="font-size:15px;font-weight:600;color:#e8e8f0">全部节点</div>' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new">⚓ 新建锚定</button></div>' +
             '<div id="tlg-archive-list"></div></div></div>' +
             // summary
@@ -693,8 +723,8 @@
             '<div class="tlg-view" data-view="engine">' +
             '<div class="tlg-scroll-panel">' +
             '<div class="tlg-section"><div class="tlg-section-title">API 配置</div>' +
-            '<label class="tlg-label">API 基础地址</label><div class="tlg-row">' +
-            '<input class="tlg-input" id="tlg-api-url" value="' + escHtml(s.apiUrl || "") + '" />' +
+            '<label class="tlg-label">API 基础地址（填基址即可，自动补全路径）</label><div class="tlg-row">' +
+            '<input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" />' +
             '<button type="button" class="tlg-btn" id="tlg-test-api">测试</button></div>' +
             '<label class="tlg-label">API 密钥</label>' +
             '<input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:12px" />' +
@@ -709,7 +739,7 @@
             '<label class="tlg-label">向量 API 密钥</label>' +
             '<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">向量模型</label>' +
-            '<input class="tlg-input" id="tlg-vec-model" placeholder="text-embedding-3-small" value="' + escHtml(s.vectorModel || '') + '" style="margin-bottom:8px" />' +
+            '<input class="tlg-input" id="tlg-vec-model" placeholder="text-embedding-3-small" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">检索提示词模板</label>' +
             '<textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + "</textarea></div>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important">保存引擎设置</button>' +
@@ -719,17 +749,17 @@
         bindPanelEvents(panel);
     }
 
-        function openPanel() {
+    function openPanel() {
         if (!isEnabled()) {
             toast("河岸凝视已关闭，请到「扩展」设置中开启。");
             return;
         }
         loadFromMetadata();
-        
+
         // ★ 如果面板已存在，先销毁再重建（确保数据刷新）
         var existingPanel = document.getElementById("tlg-panel");
         if (existingPanel) existingPanel.remove();
-        
+
         ensurePanelBuilt();
         var panel = document.getElementById("tlg-panel");
         if (!panel) return;
@@ -753,7 +783,6 @@
         panel.querySelectorAll(".tlg-view").forEach(function (v) {
             var on = v.getAttribute("data-view") === name;
             v.classList.toggle("active", on);
-            // 兼容旧写法
             if (!on) v.style.display = "none";
             else v.style.display = "flex";
         });
@@ -794,9 +823,14 @@
             state.settings.summaryPrompt = this.value;
             saveToMetadata();
         };
-        document.getElementById("tlg-summary-run").onclick = function () { runSummary(); };
+        document.getElementById("tlg-summary-run").addEventListener("click", function () {
+            flashBtn(this);
+            runSummary();
+        });
 
+        // 引擎保存
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
+            flashBtn(this);
             state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
@@ -809,31 +843,39 @@
             saveToMetadata();
             toast("引擎设置已保存。");
         });
-                document.getElementById("tlg-fetch-models").addEventListener("click", function () {
-            // 先同步当前输入到 state
+
+        // 拉取模型
+        document.getElementById("tlg-fetch-models").addEventListener("click", function () {
+            flashBtn(this);
             state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             saveToMetadata();
             fetchModelList();
         });
+
+        // 模型选择
         document.getElementById("tlg-model-select").addEventListener("change", function () {
             if (this.value) document.getElementById("tlg-model-manual").value = this.value;
         });
-        document.getElementById("tlg-test-api").addEventListener("click", async function () {
+
+        // 测试API（.then链，无async）
+        document.getElementById("tlg-test-api").addEventListener("click", function () {
+            var self = this;
             var url = document.getElementById("tlg-api-url").value.trim();
             var key = document.getElementById("tlg-api-key").value.trim();
             if (!url) { toast("请先输入地址。"); return; }
-            // 同步保存
+            flashBtn(self);
             state.settings.apiUrl = url;
             state.settings.apiKey = key;
             saveToMetadata();
             toast("正在测试…");
-            try {
-                var res = await fetch(buildEndpoint(url, "/models"), {
-                    headers: key ? { Authorization: "Bearer " + key } : {}
-                });
+            fetch(buildEndpoint(url, "/models"), {
+                headers: key ? { Authorization: "Bearer " + key } : {}
+            }).then(function (res) {
                 toast(res.ok ? "✓ API 可达。" : ("✗ HTTP " + res.status));
-            } catch (e) { toast("✗ " + e.message); }
+            }).catch(function (e) {
+                toast("✗ " + e.message);
+            });
         });
 
         initCanvasEvents();
@@ -960,7 +1002,6 @@
             "<span>启用插件</span>" +
             '<div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div>' +
             '<div style="font-size:12px;opacity:.75;margin-bottom:10px;">关闭后隐藏菜单入口并停止全屏面板。</div>' +
-            // ★ 不用 menu_button，避免竖排
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open">打开河岸凝视面板</button>' +
             '<div style="font-size:11px;opacity:.55;margin-top:10px;">斜杠命令：/tlg_anchor</div>' +
             "</div></div>";
@@ -1012,15 +1053,15 @@
         try {
             var ctx0 = getST();
             if (ctx0 && ctx0.eventSource && ctx0.eventTypes) {
-                        ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
-            var p = document.getElementById("tlg-panel");
-            if (p) p.remove(); // 销毁，下次打开时重建
-            document.body.style.overflow = "";
-        });
+                ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
+                    var p = document.getElementById("tlg-panel");
+                    if (p) p.remove();
+                    document.body.style.overflow = "";
+                });
             }
         } catch (e) {}
 
-        console.log("[TLG] 河岸凝视 v2.2 已加载（#tlg-panel 方案）");
+        console.log("[TLG] 河岸凝视 v2.3 已加载");
     }
 
     if (document.readyState === "loading") {
@@ -1029,3 +1070,5 @@
         setTimeout(boot, 300);
     }
 })();
+
+
