@@ -227,44 +227,84 @@
 
     /** 锚定弹窗：遮罩 + 正中盒子，不碰 body */
     function showAnchorModal(prefill) {
+    closeModal();
+
+    // 遮罩：铺满全屏，拦截所有触摸
+    var mask = document.createElement('div');
+    mask.id = 'tlg-modal';
+    mask.setAttribute('style',
+        'position:fixed;top:0;left:0;width:100%;height:100%;' +
+        'background:rgba(0,0,0,0.75);z-index:2147483646;' +
+        'touch-action:none;overscroll-behavior:none;'
+    );
+
+    // 弹窗本体：用 flex 居中，不用 transform（避免某些手机偏移）
+    var wrap = document.createElement('div');
+    wrap.setAttribute('style',
+        'position:fixed;top:0;left:0;width:100%;height:100%;' +
+        'z-index:2147483647;display:flex;align-items:center;justify-content:center;' +
+        'padding:16px;box-sizing:border-box;' +
+        'touch-action:none;overscroll-behavior:none;'
+    );
+
+    var box = document.createElement('div');
+    box.id = 'tlg-modal-box';
+    box.setAttribute('style',
+        'background:#0a0a10;border:1px solid #2a2a3a;border-radius:10px;' +
+        'padding:20px;width:100%;max-width:420px;color:#c0c0c8;box-sizing:border-box;' +
+        'max-height:80vh;overflow-y:auto;'
+    );
+    box.innerHTML =
+        '<div style="font-size:16px;font-weight:600;color:#e8e8f0;margin-bottom:14px;">⚓ 创建锚定点</div>' +
+        '<div style="margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">节点名称</div>' +
+        '<input id="tlg-anc-name" value="' + escHtml(prefill || '') + '" placeholder="例：决斗之前…" ' +
+        'style="width:100%;padding:10px 12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:16px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">简要描述</div>' +
+        '<textarea id="tlg-anc-brief" placeholder="此时此刻的情况概述…" ' +
+        'style="width:100%;padding:10px 12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:14px;min-height:90px;box-sizing:border-box;resize:vertical;"></textarea>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
+        '<button type="button" id="tlg-anc-cancel" style="padding:8px 16px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:13px;cursor:pointer;">取消</button>' +
+        '<button type="button" id="tlg-anc-ok" style="padding:8px 16px;background:rgba(192,192,200,0.12);border:1px solid #6a6a78;border-radius:4px;color:#e8e8f0;font-size:13px;cursor:pointer;">⚓ 确认锚定</button>' +
+        '</div>';
+
+    wrap.appendChild(box);
+    document.body.appendChild(mask);
+    document.body.appendChild(wrap);
+    wrap.id = 'tlg-modal-wrap';
+
+    // 点遮罩关闭
+    mask.addEventListener('click', closeModal);
+    // 拦截遮罩上的滑动，不传给聊天区
+    mask.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
+    wrap.addEventListener('touchmove', function(e){
+        // 仅允许 box 内部滚动，wrap 本身不传透
+        if (!box.contains(e.target)) e.preventDefault();
+    }, { passive: false });
+
+    document.getElementById('tlg-anc-cancel').onclick = closeModal;
+    document.getElementById('tlg-anc-ok').onclick = function () {
+        var name = document.getElementById('tlg-anc-name').value.trim() || ('节点 ' + state.nodes.length);
+        var brief = document.getElementById('tlg-anc-brief').value.trim();
+        createAnchor(name, brief);
         closeModal();
+    };
+    setTimeout(function () {
+        var inp = document.getElementById('tlg-anc-name');
+        if (inp) inp.focus();
+    }, 50);
+}
 
-        var mask = document.createElement('div');
-        mask.id = 'tlg-modal';
+function closeModal() {
+    ['tlg-modal', 'tlg-modal-wrap', 'tlg-modal-box'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+}
 
-        var box = document.createElement('div');
-        box.id = 'tlg-modal-box';
-        box.innerHTML =
-            '<div style="font-size:16px;font-weight:600;color:#e8e8f0;margin-bottom:14px;">⚓ 创建锚定点</div>' +
-            '<div style="margin-bottom:12px;">' +
-            '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">节点名称</div>' +
-            '<input id="tlg-anc-name" value="' + escHtml(prefill || '') + '" placeholder="例：决斗之前…">' +
-            '</div>' +
-            '<div style="margin-bottom:16px;">' +
-            '<div style="font-size:12px;color:#6a6a78;margin-bottom:6px;">简要描述</div>' +
-            '<textarea id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea>' +
-            '</div>' +
-            '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
-            '<button type="button" id="tlg-anc-cancel" class="tlg-btn" style="padding:8px 16px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;cursor:pointer;">取消</button>' +
-            '<button type="button" id="tlg-anc-ok" style="padding:8px 16px;background:rgba(192,192,200,0.12);border:1px solid #6a6a78;border-radius:4px;color:#e8e8f0;cursor:pointer;">⚓ 确认锚定</button>' +
-            '</div>';
-
-        document.body.appendChild(mask);
-        document.body.appendChild(box);
-
-        mask.addEventListener('click', function () { closeModal(); });
-        document.getElementById('tlg-anc-cancel').onclick = function () { closeModal(); };
-        document.getElementById('tlg-anc-ok').onclick = function () {
-            var name = document.getElementById('tlg-anc-name').value.trim() || ('节点 ' + state.nodes.length);
-            var brief = document.getElementById('tlg-anc-brief').value.trim();
-            createAnchor(name, brief);
-            closeModal();
-        };
-        setTimeout(function () {
-            var inp = document.getElementById('tlg-anc-name');
-            if (inp) inp.focus();
-        }, 50);
-    }
 
     function closeModal() {
         var m = document.getElementById('tlg-modal');
