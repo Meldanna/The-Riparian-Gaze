@@ -1,6 +1,31 @@
 (function () {
     console.log('[TLG] 时间线系统启动');
 
+    // 直接注入样式,不依赖manifest.json的css字段
+    var styleEl = document.createElement('style');
+    styleEl.id = 'tlg-style';
+    styleEl.textContent = `
+        #tlg-panel {
+            position: fixed !important; top: 60px !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+            background: #050508 !important; color: #c0c0c8 !important; z-index: 999999 !important;
+            display: flex !important; flex-direction: column !important;
+        }
+        #tlg-tabs { display: flex; border-bottom: 1px solid #333; flex-shrink: 0; }
+        .tlg-tab { padding: 10px 16px; cursor: pointer; color: #888; }
+        .tlg-tab.active { color: #e8e8f0; border-bottom: 2px solid #b8b8d8; }
+        #tlg-close { margin-left: auto; padding: 10px 16px; cursor: pointer; color: #888; }
+        #tlg-close:hover { color: #fff; }
+        #tlg-body { flex: 1; overflow: auto; padding: 16px; }
+    `;
+    document.head.appendChild(styleEl);
+
+    function getCtx() {
+        return window.SillyTavern.getContext();
+    }
+    // ...(下面 getTree/saveTree/createNode/openPanel/injectButton 等函数原样保留,不用动)
+(function () {
+    console.log('[TLG] 时间线系统启动');
+
     function getCtx() {
         return window.SillyTavern.getContext();
     }
