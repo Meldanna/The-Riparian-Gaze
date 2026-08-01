@@ -98,9 +98,16 @@
         st.chat_metadata[METADATA_KEY] = JSON.parse(JSON.stringify(state));
         if (typeof st.saveMetadata === "function") st.saveMetadata();
         else if (typeof window.saveMetadataDebounced === "function") window.saveMetadataDebounced();
+        
+        // ★ 备份到 localStorage
+        try {
+            var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "unknown";
+            localStorage.setItem("tlg_backup_" + chatId, JSON.stringify(state));
+        } catch (e) { console.warn("[TLG] localStorage backup failed:", e); }
     }
 
-    function loadFromMetadata() {
+
+        function loadFromMetadata() {
         var st = getST();
         if (!st) return;
         var saved = st.chat_metadata && st.chat_metadata[METADATA_KEY];
@@ -109,6 +116,17 @@
             if (!state.settings) state.settings = {};
             if (state._lastChatLen == null) state._lastChatLen = 0;
         } else {
+            // ★ chat_metadata 没有数据时，尝试从 localStorage 恢复
+            try {
+                var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "";
+                var backup = chatId && localStorage.getItem("tlg_backup_" + chatId);
+                if (backup) {
+                    state = JSON.parse(backup);
+                    toast("已从本地备份恢复时间线数据。");
+                    saveToMetadata(); // 写回 chat_metadata
+                    return;
+                }
+            } catch (e) {}
             resetState();
             saveToMetadata();
         }
@@ -245,7 +263,7 @@
         var backdrop = document.createElement("div");
         backdrop.className = "tlg-modal-backdrop";
         backdrop.id = "tlg-anchor-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:25vh;padding-left:16px;padding-right:16px;padding-bottom:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
         backdrop.innerHTML =
             '<div class="tlg-modal">' +
             '<div class="tlg-modal-title">⚓ 创建锚定点</div>' +
@@ -701,16 +719,20 @@
         bindPanelEvents(panel);
     }
 
-    function openPanel() {
+        function openPanel() {
         if (!isEnabled()) {
             toast("河岸凝视已关闭，请到「扩展」设置中开启。");
             return;
         }
         loadFromMetadata();
+        
+        // ★ 如果面板已存在，先销毁再重建（确保数据刷新）
+        var existingPanel = document.getElementById("tlg-panel");
+        if (existingPanel) existingPanel.remove();
+        
         ensurePanelBuilt();
         var panel = document.getElementById("tlg-panel");
         if (!panel) return;
-        // ★ 和能用框架完全一样
         panel.style.display = "flex";
         document.body.style.overflow = "hidden";
         setTimeout(function () { renderCanvas(); }, 80);
@@ -774,7 +796,7 @@
         };
         document.getElementById("tlg-summary-run").onclick = function () { runSummary(); };
 
-        document.getElementById("tlg-engine-save").onclick = function () {
+        document.getElementById("tlg-engine-save").addEventListener("click", function () {
             state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
@@ -786,15 +808,25 @@
             state.settings.model = manual || sel;
             saveToMetadata();
             toast("引擎设置已保存。");
-        };
-        document.getElementById("tlg-fetch-models").onclick = function () { fetchModelList(); };
-        document.getElementById("tlg-model-select").onchange = function () {
+        });
+                document.getElementById("tlg-fetch-models").addEventListener("click", function () {
+            // 先同步当前输入到 state
+            state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
+            state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
+            saveToMetadata();
+            fetchModelList();
+        });
+        document.getElementById("tlg-model-select").addEventListener("change", function () {
             if (this.value) document.getElementById("tlg-model-manual").value = this.value;
-        };
-        document.getElementById("tlg-test-api").onclick = async function () {
+        });
+        document.getElementById("tlg-test-api").addEventListener("click", async function () {
             var url = document.getElementById("tlg-api-url").value.trim();
             var key = document.getElementById("tlg-api-key").value.trim();
             if (!url) { toast("请先输入地址。"); return; }
+            // 同步保存
+            state.settings.apiUrl = url;
+            state.settings.apiKey = key;
+            saveToMetadata();
             toast("正在测试…");
             try {
                 var res = await fetch(buildEndpoint(url, "/models"), {
@@ -802,7 +834,7 @@
                 });
                 toast(res.ok ? "✓ API 可达。" : ("✗ HTTP " + res.status));
             } catch (e) { toast("✗ " + e.message); }
-        };
+        });
 
         initCanvasEvents();
     }
@@ -980,9 +1012,11 @@
         try {
             var ctx0 = getST();
             if (ctx0 && ctx0.eventSource && ctx0.eventTypes) {
-                ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
-                    closePanel();
-                });
+                        ctx0.eventSource.on(ctx0.eventTypes.CHAT_CHANGED, function () {
+            var p = document.getElementById("tlg-panel");
+            if (p) p.remove(); // 销毁，下次打开时重建
+            document.body.style.overflow = "";
+        });
             }
         } catch (e) {}
 
