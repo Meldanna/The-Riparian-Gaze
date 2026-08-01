@@ -690,6 +690,8 @@
             '<input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">向量 API 密钥</label>' +
             '<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">向量模型</label>' +
+            '<input class="tlg-input" id="tlg-vec-model" placeholder="text-embedding-3-small" value="' + escHtml(s.vectorModel || '') + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">检索提示词模板</label>' +
             '<textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + "</textarea></div>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important">保存引擎设置</button>' +
@@ -777,6 +779,7 @@
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
             state.settings.vectorKey = document.getElementById("tlg-vec-key").value.trim();
+            state.settings.vectorModel = document.getElementById("tlg-vec-model").value.trim();
             state.settings.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
             var manual = document.getElementById("tlg-model-manual").value.trim();
             var sel = document.getElementById("tlg-model-select").value;
