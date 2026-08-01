@@ -1,11 +1,12 @@
 {
-    "display_name": "The Riparian Gaze",
-    "loading_order": 10,
-    "requires": [],
-    "optional": [],
-    "js": "index.js",
-    "author": "Meldanna",
-    "version": "0.4.0",
-    "homePage": "https://github.com/Meldanna/The-Riparian-Gaze",
-    "auto_update": true
+  "display_name": "The Riparian Gaze",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "RiparianGaze",
+  "version": "1.0.0",
+  "homePage": "https://github.com/your-repo/Extension-RiparianGaze",
+  "auto_update": true
 }
