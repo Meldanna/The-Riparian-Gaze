@@ -23,13 +23,6 @@
         return window.SillyTavern.getContext();
     }
     // ...(下面 getTree/saveTree/createNode/openPanel/injectButton 等函数原样保留,不用动)
-(function () {
-    console.log('[TLG] 时间线系统启动');
-
-    function getCtx() {
-        return window.SillyTavern.getContext();
-    }
-
     function getTree() {
         var ctx = getCtx();
         if (!ctx.chatMetadata.tlg_tree) {
