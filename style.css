@@ -1,4 +1,4 @@
-/* 河岸凝视 — 全屏 + 移动端 */
+/* 河岸凝视 — 沿用已验证的 #tlg-panel 全屏方案 */
 *, *::before, *::after { box-sizing: border-box; }
 
 :root {
@@ -11,34 +11,30 @@
   --tlg-accent: #8888aa;
   --tlg-tab-active: #18182a;
   --tlg-input-bg: #0e0e18;
-  --tlg-scrollbar: #2a2a3a;
   --tlg-danger: #aa4444;
 }
 
-/* 全屏：必须盖住整个视口（含手机） */
-#tlg-overlay {
-  display: none !important;
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100vw !important;
-  width: 100dvw !important;
-  height: 100vh !important;
-  height: 100dvh !important;
+/* ★ 核心：和能用的框架同一套全屏写法 */
+#tlg-panel {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
   max-height: -webkit-fill-available;
   background: var(--tlg-void);
-  z-index: 100000 !important;
+  z-index: 99999;
   flex-direction: column;
   font-family: -apple-system, "Segoe UI", sans-serif;
   color: var(--tlg-silver);
   overflow: hidden;
-  padding: env(safe-area-inset-top, 0)
-           env(safe-area-inset-right, 0)
-           env(safe-area-inset-bottom, 0)
-           env(safe-area-inset-left, 0);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-#tlg-overlay.tlg-active { display: flex !important; }
 
-.tlg-tab-bar {
+#tlg-tabs {
   display: flex;
   height: 48px;
   min-height: 48px;
@@ -48,7 +44,7 @@
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-.tlg-tab-bar::-webkit-scrollbar { display: none; }
+#tlg-tabs::-webkit-scrollbar { display: none; }
 
 .tlg-tab {
   padding: 0 12px;
@@ -56,7 +52,7 @@
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--tlg-silver-dim);
   border-bottom: 2px solid transparent;
   flex-shrink: 0;
@@ -68,12 +64,8 @@
   border-bottom-color: var(--tlg-silver);
   background: var(--tlg-tab-active);
 }
-.tlg-tab-icon { margin-right: 4px; }
-@media (max-width: 420px) {
-  .tlg-tab-label { display: none; }
-  .tlg-tab-icon { margin-right: 0; font-size: 16px; }
-}
-.tlg-close-btn {
+
+#tlg-close {
   margin-left: auto;
   padding: 0 16px;
   display: flex;
@@ -84,21 +76,24 @@
   flex-shrink: 0;
 }
 
-.tlg-tab-content {
+#tlg-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   position: relative;
 }
-.tlg-panel {
+
+.tlg-view {
   display: none;
   width: 100%;
   height: 100%;
   position: absolute;
   inset: 0;
+  overflow: hidden;
 }
-.tlg-panel.active { display: flex; }
+.tlg-view.active { display: flex; }
 
+/* 因果树 */
 #tlg-canvas-wrap {
   flex: 1 1 auto;
   position: relative;
@@ -111,7 +106,6 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  cursor: grab;
   touch-action: none;
 }
 #tlg-canvas-toolbar {
@@ -120,6 +114,7 @@
   display: flex; flex-wrap: wrap; gap: 8px; z-index: 2;
 }
 
+/* 简介：桌面侧栏 / 手机底抽屉 */
 #tlg-brief-panel {
   width: 0;
   background: var(--tlg-panel-bg);
@@ -133,7 +128,7 @@
 #tlg-brief-panel.open { width: min(340px, 42vw); }
 
 @media (max-width: 700px) {
-  #tlg-panel-tree { flex-direction: column; }
+  #tlg-view-tree { flex-direction: column; }
   #tlg-brief-panel {
     width: 100% !important;
     height: 0;
@@ -165,35 +160,47 @@
   flex-shrink: 0;
 }
 
-.tlg-btn {
-  padding: 8px 12px;
+/* 按钮：禁止竖排 */
+.tlg-btn,
+#tlg_settings_open {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
   border: 1px solid var(--tlg-border);
   background: var(--tlg-input-bg);
   color: var(--tlg-silver);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
   -webkit-tap-highlight-color: transparent;
 }
 .tlg-btn-primary { background: rgba(192,192,200,.12); border-color: var(--tlg-silver-dim); }
 .tlg-btn-danger { border-color: var(--tlg-danger); color: var(--tlg-danger); }
 .tlg-btn-jump {
-  width: 100%; padding: 12px;
+  width: 100% !important;
+  padding: 12px;
   background: rgba(192,192,200,.1);
   border: 1px solid var(--tlg-silver-dim);
-  color: var(--tlg-silver-bright); font-size: 13px;
+  color: var(--tlg-silver-bright);
 }
 
-.tlg-archive-panel,
-.tlg-summary-panel,
-.tlg-engine-panel {
+.tlg-scroll-panel {
   flex-direction: column;
   width: 100%;
+  height: 100%;
   padding: 12px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   gap: 12px;
 }
+
 .tlg-archive-card {
   background: var(--tlg-panel-bg);
   border: 1px solid var(--tlg-border);
@@ -211,6 +218,7 @@
   border: 1px solid var(--tlg-border);
   border-radius: 6px;
   padding: 12px;
+  margin-bottom: 12px;
 }
 .tlg-section-title {
   font-size: 13px; font-weight: 600;
@@ -224,7 +232,7 @@
   border: 1px solid var(--tlg-border);
   border-radius: 4px;
   color: var(--tlg-silver);
-  font-size: 16px; /* 防 iOS 缩放 */
+  font-size: 16px;
   outline: none;
 }
 .tlg-textarea {
@@ -249,19 +257,16 @@
 }
 .tlg-toggle.on::after { transform: translateX(18px); }
 
-/* 弹窗：居中 + 安全区，不顶出屏幕 */
+/* ★ 弹窗：从顶部留空开始排，不再居中裁切 */
 .tlg-modal-backdrop {
-  position: fixed !important;
-  inset: 0 !important;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,.78);
-  z-index: 100010 !important;
+  z-index: 100000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: max(12px, env(safe-area-inset-top, 12px))
-           max(12px, env(safe-area-inset-right, 12px))
-           max(12px, env(safe-area-inset-bottom, 12px))
-           max(12px, env(safe-area-inset-left, 12px));
+  padding: max(56px, env(safe-area-inset-top, 56px)) 16px 24px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -272,9 +277,7 @@
   padding: 18px;
   width: 100%;
   max-width: 420px;
-  max-height: calc(100dvh - 24px);
-  overflow-y: auto;
-  margin: auto;
+  margin: 0 auto;
   box-shadow: 0 8px 40px rgba(0,0,0,.55);
 }
 .tlg-modal-title {
@@ -295,13 +298,9 @@
   border: 1px solid var(--tlg-border);
   border-radius: 8px; padding: 12px 14px;
   color: var(--tlg-silver); font-size: 13px;
-  z-index: 100020 !important;
+  z-index: 100001;
   text-align: center;
-  box-shadow: 0 4px 20px rgba(0,0,0,.45);
 }
 
-/* 扩展设置抽屉 */
 #tlg_settings_block { margin: 6px 0; }
-#tlg_settings_block .tlg-settings-actions {
-  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;
-}
+#tlg_settings_block .inline-drawer-content { overflow: visible; }
