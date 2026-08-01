@@ -1,6 +1,6 @@
 /**
- * 河岸凝视 v2.3
- * 修复：按钮反馈 / API兼容 / async移除 / 弹窗居中 / 数据持久化
+ * 河岸凝视 v2.4
+ * 修复：API全局存储 / Toast层级与样式 / 锚定弹窗定位回退
  */
 (function () {
     "use strict";
@@ -31,6 +31,28 @@
         _lastChatLen: 0
     };
 
+    // ── 全局设置（独立于聊天，解决 API 设置丢失问题）──
+    var SETTINGS_KEY = "tlg_global_settings";
+
+    function loadGlobalSettings() {
+        try {
+            var saved = localStorage.getItem(SETTINGS_KEY);
+            if (saved) {
+                var obj = JSON.parse(saved);
+                var keys = ["apiUrl", "apiKey", "model", "modelList", "vectorUrl", "vectorKey", "vectorModel", "vectorPrompt", "summaryPrompt", "autoMode", "autoInterval", "lastNMessages"];
+                for (var i = 0; i < keys.length; i++) {
+                    if (obj[keys[i]] !== undefined) state.settings[keys[i]] = obj[keys[i]];
+                }
+            }
+        } catch (e) { console.warn("[TLG] loadGlobalSettings:", e); }
+    }
+
+    function saveGlobalSettings() {
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+        } catch (e) { console.warn("[TLG] saveGlobalSettings:", e); }
+    }
+
     var canvas = null, ctx = null;
     var camX = 0, camY = 0, camZoom = 1;
     var isPanning = false, panStartX = 0, panStartY = 0;
@@ -45,12 +67,12 @@
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
 
-    // ── Toast（内联样式，不依赖CSS）──
+    // ── Toast（强化样式，防止被遮挡）──
     function toast(msg, duration) {
         duration = duration || 2800;
         var el = document.createElement("div");
         el.textContent = msg;
-        el.style.cssText = "position:fixed;left:50%;bottom:30px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#0a0a10;border:1px solid #2a2a3a;border-radius:8px;color:#c0c0c8;font-size:13px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;";
+        el.style.cssText = "position:fixed;left:50%;bottom:60px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#1a1a28;border:1px solid #3a3a4a;border-radius:8px;color:#e8e8f0;font-size:14px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;box-shadow:0 4px 20px rgba(0,0,0,0.6);";
         document.body.appendChild(el);
         setTimeout(function () {
             el.style.opacity = "0";
@@ -107,11 +129,11 @@
         st.chat_metadata[METADATA_KEY] = JSON.parse(JSON.stringify(state));
         if (typeof st.saveMetadata === "function") st.saveMetadata();
         else if (typeof window.saveMetadataDebounced === "function") window.saveMetadataDebounced();
-        // ★ 备份到 localStorage
+        // 备份到 localStorage
         try {
             var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "unknown";
             localStorage.setItem("tlg_backup_" + chatId, JSON.stringify(state));
-        } catch (e) { console.warn("[TLG] localStorage backup failed:", e); }
+        } catch (e) { }
     }
 
     function loadFromMetadata() {
@@ -123,7 +145,7 @@
             if (!state.settings) state.settings = {};
             if (state._lastChatLen == null) state._lastChatLen = 0;
         } else {
-            // ★ 尝试从 localStorage 恢复
+            // 尝试从 localStorage 恢复
             try {
                 var chatId = st.chatId || (st.getCurrentChatId && st.getCurrentChatId()) || "";
                 var backup = chatId && localStorage.getItem("tlg_backup_" + chatId);
@@ -131,12 +153,17 @@
                     state = JSON.parse(backup);
                     toast("已从本地备份恢复时间线数据。");
                     saveToMetadata();
-                    return;
+                } else {
+                    resetState();
+                    saveToMetadata();
                 }
-            } catch (e) {}
-            resetState();
-            saveToMetadata();
+            } catch (e) {
+                resetState();
+                saveToMetadata();
+            }
         }
+        // ★ 加载全局 API 设置（覆盖绑定在聊天里的设置）
+        loadGlobalSettings();
     }
 
     function resetState() {
@@ -177,7 +204,7 @@
                 var all = window.getAllVariables();
                 if (all && all.stat_data != null) return JSON.parse(JSON.stringify(all.stat_data));
             }
-        } catch (e) { console.warn("[TLG] getMVUStatData", e); }
+        } catch (e) {}
         return null;
     }
 
@@ -190,7 +217,7 @@
                 if (typeof st.saveMetadata === "function") st.saveMetadata();
             }
             if (typeof window.setVariable === "function") window.setVariable("stat_data", data);
-        } catch (e) { console.warn("[TLG] setMVUStatData", e); }
+        } catch (e) {}
     }
 
     function applyVisibility(targetNodeId) {
@@ -270,7 +297,8 @@
         var backdrop = document.createElement("div");
         backdrop.className = "tlg-modal-backdrop";
         backdrop.id = "tlg-anchor-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+        // ★ 回退为简单的居中，移除动态检查
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;";
         backdrop.innerHTML =
             '<div class="tlg-modal">' +
             '<div class="tlg-modal-title">⚓ 创建锚定点</div>' +
@@ -285,18 +313,6 @@
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">⚓ 确认锚定</button>' +
             "</div></div>";
         document.body.appendChild(backdrop);
-
-        // ★ 动态检查：弹窗比屏幕高时改为顶对齐
-        setTimeout(function () {
-            var modal = backdrop.querySelector(".tlg-modal");
-            if (!modal) return;
-            var vh = window.innerHeight || document.documentElement.clientHeight;
-            var mh = modal.offsetHeight || 300;
-            if (mh >= vh - 32) {
-                backdrop.style.alignItems = "flex-start";
-                backdrop.style.paddingTop = "16px";
-            }
-        }, 30);
 
         var nameInput = backdrop.querySelector("#tlg-anc-name");
         backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
@@ -577,18 +593,16 @@
         });
     }
 
-    // ── API端点（参考桌宠逻辑）──
+    // ── API端点（自动补全）──
     function buildEndpoint(base, path) {
         var url = (base || "").trim().replace(/\/+$/, "");
-        // 如果已经包含完整路径就直接用
         if (path === "/chat/completions" && /\/chat\/completions$/.test(url)) return url;
         if (path === "/models" && /\/models$/.test(url)) return url;
-        // 自动补 /v1
         if (!/\/v\d+/.test(url)) url += "/v1";
         return url + path;
     }
 
-    // ── 总结（.then链，无async）──
+    // ── 总结 ──
     function runSummary() {
         var apiUrl = (state.settings.apiUrl || "").trim();
         var apiKey = (state.settings.apiKey || "").trim();
@@ -600,7 +614,7 @@
         }).join("\n");
         var prompt = (state.settings.summaryPrompt || "").replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run");
-        if (btn) { btn.disabled = true; flashBtn(btn); }
+        if (btn) btn.disabled = true;
         toast("正在生成总结…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST",
@@ -630,13 +644,13 @@
         });
     }
 
-    // ── 拉取模型（.then链，无async）──
+    // ── 拉取模型 ──
     function fetchModelList() {
         var apiUrl = (state.settings.apiUrl || "").trim();
         var apiKey = (state.settings.apiKey || "").trim();
         if (!apiUrl) { toast("请先设置 API 地址。"); return; }
         var btn = document.getElementById("tlg-fetch-models");
-        if (btn) { btn.disabled = true; flashBtn(btn); }
+        if (btn) btn.disabled = true;
         toast("正在拉取模型列表…");
         fetch(buildEndpoint(apiUrl, "/models"), {
             headers: apiKey ? { Authorization: "Bearer " + apiKey } : {}
@@ -649,6 +663,7 @@
             }).filter(Boolean);
             state.settings.modelList = models;
             saveToMetadata();
+            saveGlobalSettings();
             populateModelSelect();
             toast("已加载 " + models.length + " 个模型。");
         }).catch(function (e) {
@@ -669,7 +684,7 @@
             }).join("");
     }
 
-    // ── ★ 打开面板 ──
+    // ── 打开面板 ──
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return;
 
@@ -755,8 +770,7 @@
             return;
         }
         loadFromMetadata();
-
-        // ★ 如果面板已存在，先销毁再重建（确保数据刷新）
+        
         var existingPanel = document.getElementById("tlg-panel");
         if (existingPanel) existingPanel.remove();
 
@@ -806,29 +820,32 @@
         };
         document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
 
-        document.getElementById("tlg-auto-toggle").onclick = function () {
+        document.getElementById("tlg-auto-toggle").addEventListener("click", function () {
             state.settings.autoMode = !state.settings.autoMode;
             this.classList.toggle("on", state.settings.autoMode);
             saveToMetadata();
-        };
-        document.getElementById("tlg-auto-interval").onchange = function () {
+            saveGlobalSettings();
+        });
+        document.getElementById("tlg-auto-interval").addEventListener("change", function () {
             state.settings.autoInterval = Math.max(1, parseInt(this.value, 10) || 10);
             saveToMetadata();
-        };
-        document.getElementById("tlg-last-n").onchange = function () {
+            saveGlobalSettings();
+        });
+        document.getElementById("tlg-last-n").addEventListener("change", function () {
             state.settings.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5);
             saveToMetadata();
-        };
-        document.getElementById("tlg-summary-prompt").onchange = function () {
+            saveGlobalSettings();
+        });
+        document.getElementById("tlg-summary-prompt").addEventListener("change", function () {
             state.settings.summaryPrompt = this.value;
             saveToMetadata();
-        };
+            saveGlobalSettings();
+        });
         document.getElementById("tlg-summary-run").addEventListener("click", function () {
             flashBtn(this);
             runSummary();
         });
 
-        // 引擎保存
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
             flashBtn(this);
             state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
@@ -841,24 +858,23 @@
             var sel = document.getElementById("tlg-model-select").value;
             state.settings.model = manual || sel;
             saveToMetadata();
+            saveGlobalSettings();
             toast("引擎设置已保存。");
         });
 
-        // 拉取模型
         document.getElementById("tlg-fetch-models").addEventListener("click", function () {
             flashBtn(this);
             state.settings.apiUrl = document.getElementById("tlg-api-url").value.trim();
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             saveToMetadata();
+            saveGlobalSettings();
             fetchModelList();
         });
 
-        // 模型选择
         document.getElementById("tlg-model-select").addEventListener("change", function () {
             if (this.value) document.getElementById("tlg-model-manual").value = this.value;
         });
 
-        // 测试API（.then链，无async）
         document.getElementById("tlg-test-api").addEventListener("click", function () {
             var self = this;
             var url = document.getElementById("tlg-api-url").value.trim();
@@ -868,6 +884,7 @@
             state.settings.apiUrl = url;
             state.settings.apiKey = key;
             saveToMetadata();
+            saveGlobalSettings();
             toast("正在测试…");
             fetch(buildEndpoint(url, "/models"), {
                 headers: key ? { Authorization: "Bearer " + key } : {}
@@ -1061,7 +1078,7 @@
             }
         } catch (e) {}
 
-        console.log("[TLG] 河岸凝视 v2.3 已加载");
+        console.log("[TLG] 河岸凝视 v2.4 已加载");
     }
 
     if (document.readyState === "loading") {
@@ -1070,5 +1087,3 @@
         setTimeout(boot, 300);
     }
 })();
-
-
