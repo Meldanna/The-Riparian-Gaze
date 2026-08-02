@@ -597,29 +597,59 @@
         return url + path;
     }
     
-    // ── 总结自动注入 AI 上下文 ──
-    function updateInjection() {
+    // ── 总结自动注入 AI 上下文 加向量检索──
+        function updateInjectionWithVector() {
         var st = getST();
         if (!st || typeof st.setExtensionPrompt !== "function") return;
-        if (!state.summaries || !state.summaries.length) {
-            st.setExtensionPrompt(EXT_NAME, "", 1, 4);
-            return;
-        }
-        // 取最近 3 条总结（可调）
-        var count = Math.min(3, state.summaries.length);
-        var recent = state.summaries.slice(-count);
-        var template = globalApi.vectorPrompt || "";
-        var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
+        if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 4); return; }
 
-        var injectionText;
-        if (template && template.indexOf("{{context}}") !== -1) {
-            injectionText = template.replace("{{context}}", content);
-        } else {
-            injectionText = "以下为已记录的近期因果档案，作为背景参考：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
-        }
-        // position=1 (after system prompt), depth=4 (在第4条消息深度插入)
-        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 4);
+        var vecUrl = (globalApi.vectorUrl || "").trim();
+        var vecKey = (globalApi.vectorKey || "").trim();
+        var vecModel = (globalApi.vectorModel || "").trim();
+
+        // 没有向量 API，降级为取最近 3 条
+        if (!vecUrl || !vecModel) { updateInjection(); return; }
+
+        // 取最近几条对话作为查询
+        var chat = (st.chat || []).slice(-5).map(function (m) { return (m.mes || "").slice(0, 200); }).join(" ");
+
+        // 对查询文本做 embedding
+        fetch(buildEndpoint(vecUrl, "/embeddings"), {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
+            body: JSON.stringify({ model: vecModel, input: chat })
+        }).then(function (r) { return r.json(); })
+        .then(function (data) {
+            var queryVec = data.data && data.data[0] && data.data[0].embedding;
+            if (!queryVec) { updateInjection(); return; }
+
+            // 对所有总结做 embedding（简化：每次都算，生产环境应缓存）
+            var texts = state.summaries.map(function (s) { return s.text; });
+            return fetch(buildEndpoint(vecUrl, "/embeddings"), {
+                method: "POST",
+                headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
+                body: JSON.stringify({ model: vecModel, input: texts })
+            }).then(function (r2) { return r2.json(); }).then(function (data2) {
+                var embeddings = (data2.data || []).map(function (d) { return d.embedding; });
+                // 余弦相似度排序
+                var scored = embeddings.map(function (emb, idx) {
+                    var dot = 0, na = 0, nb = 0;
+                    for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
+                    return { idx: idx, score: dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8) };
+                }).sort(function (a, b) { return b.score - a.score; });
+
+                // 取 top 3
+                var top = scored.slice(0, 3);
+                var content = top.map(function (t) { return state.summaries[t.idx].text; }).join("\n\n---\n\n");
+                var template = globalApi.vectorPrompt || "";
+                var injectionText = template.indexOf("{{context}}") !== -1
+                    ? template.replace("{{context}}", content)
+                    : "以下为与当前情境相关的因果档案：\n\n" + content;
+                st.setExtensionPrompt(EXT_NAME, injectionText, 1, 4);
+            });
+        }).catch(function () { updateInjection(); }); // 失败降级
     }
+
     
     function runSummary() {
         var apiUrl = (globalApi.apiUrl || "").trim();
