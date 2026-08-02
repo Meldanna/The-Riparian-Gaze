@@ -72,7 +72,7 @@
         duration = duration || 2800;
         var el = document.createElement("div");
         el.textContent = msg;
-        el.style.cssText = "position:fixed;left:50%;bottom:60px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#1a1a28;border:1px solid #3a3a4a;border-radius:8px;color:#e8e8f0;font-size:14px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;box-shadow:0 4px 20px rgba(0,0,0,0.6);";
+        el.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#1a1a28;border:1px solid #3a3a4a;border-radius:8px;color:#e8e8f0;font-size:14px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;box-shadow:0 4px 20px rgba(0,0,0,0.6);";
         document.body.appendChild(el);
         setTimeout(function () {
             el.style.opacity = "0";
