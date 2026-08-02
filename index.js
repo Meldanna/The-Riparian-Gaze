@@ -165,30 +165,33 @@
     }
 
     // ── 主加载入口（打开面板时调用）──
-    function loadFromMetadata() {
+        function loadFromMetadata() {
         var st = getST();
         loadGlobalApi();
 
         var worldId = getCurrentWorldId();
         if (!worldId) {
-            // 尝试按 chatId 自动匹配
+            // 也检查旧格式指针
+            if (st && st.chat_metadata && st.chat_metadata[METADATA_KEY] && st.chat_metadata[METADATA_KEY]._worldId) {
+                worldId = st.chat_metadata[METADATA_KEY]._worldId;
+                setCurrentWorldId(worldId);
+            }
+        }
+        if (!worldId) {
             var chatId = getCurrentChatId();
             if (chatId) {
                 var dir = getWorldsDir();
-                var matched = null;
                 var ids = Object.keys(dir);
                 for (var i = 0; i < ids.length; i++) {
-                    if (dir[ids[i]].chatId === chatId) { matched = ids[i]; break; }
+                    if (dir[ids[i]].chatId === chatId) { worldId = ids[i]; break; }
                 }
-                if (matched) {
-                    worldId = matched;
+                if (worldId) {
                     setCurrentWorldId(worldId);
                 }
             }
         }
 
         if (!worldId) {
-            // 新聊天，尚未关联任何世界：先不自动创建，等用户在面板里操作
             resetState();
             return;
         }
@@ -197,27 +200,43 @@
     }
 
     // ── 主保存入口 ──
-    function saveToMetadata() {
+        function saveToMetadata() {
         var worldId = getCurrentWorldId();
-        if (worldId) saveWorldState(worldId);
-        // 向后兼容：同时写一份到 chat_metadata（方便调试）
+        if (worldId) {
+            saveWorldState(worldId);
+        }
         var st = getST();
         if (st) {
             if (!st.chat_metadata) st.chat_metadata = {};
             st.chat_metadata[METADATA_KEY] = { _worldId: worldId };
+            st.chat_metadata.tlg_worldId = worldId; // ★ 双写，确保 getCurrentWorldId 能读到
             if (typeof st.saveMetadata === "function") st.saveMetadata();
         }
     }
 
     // ── 确保当前聊天有关联世界（面板里用到）──
-    function ensureWorldLinked(preferName) {
+        function ensureWorldLinked(preferName) {
         var worldId = getCurrentWorldId();
         if (!worldId) {
+            // 尝试 chatId 匹配
             var chatId = getCurrentChatId();
-            worldId = createWorldEntry(preferName || "未命名世界", chatId);
-            setCurrentWorldId(worldId);
-            resetState();
-            saveWorldState(worldId);
+            var dir = getWorldsDir();
+            var ids = Object.keys(dir);
+            for (var i = 0; i < ids.length; i++) {
+                if (dir[ids[i]].chatId === chatId) { worldId = ids[i]; break; }
+            }
+            if (worldId) {
+                setCurrentWorldId(worldId);
+                loadWorldState(worldId);
+            } else {
+                worldId = createWorldEntry(preferName || "未命名世界", chatId);
+                setCurrentWorldId(worldId);
+                // 只有当 state 里没有有效节点时才 reset
+                if (!state.nodes || !state.nodes.length) {
+                    resetState();
+                }
+                saveWorldState(worldId);
+            }
         }
         return worldId;
     }
@@ -1225,9 +1244,9 @@
             // tree
             '<div class="tlg-view active" id="tlg-view-tree" data-view="tree">' +
             '<div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas>' +
-            '<div id="tlg-canvas-toolbar">' +
-            '<button type="button" class="tlg-btn" id="tlg-canvas-anchor">⚓ 在此锚定</button>' +
-            '<button type="button" class="tlg-btn" id="tlg-canvas-reset-view">重置视图</button></div></div>' +
+            '<div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;">' +
+			'<button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 在此锚定</button>' +
+			'<button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">重置视图</button></div>'
             '<div id="tlg-brief-panel">' +
             '<div class="tlg-brief-header"><span>节点</span>' +
             '<button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px">✕</button></div>' +
