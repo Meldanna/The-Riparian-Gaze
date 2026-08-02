@@ -295,49 +295,52 @@
             ctx.stroke(); ctx.shadowBlur = 0;
         }
 
-        for (i = 0; i < state.nodes.length; i++) {
+                for (i = 0; i < state.nodes.length; i++) {
             node = state.nodes[i]; pos = positions[node.id]; if (!pos) continue;
             isCurrent = node.id === state.currentNodeId; isSelected = node.id === state.selectedNodeId;
             onPath = path.indexOf(node.id) !== -1;
 
+            // 光晕层（只有路径/选中/当前才有）
             if (isCurrent) {
-                var glowR = NODE_R + 10 + pulse * 8;
+                var glowR = NODE_R + 18 + pulse * 10;
                 ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2);
-                var grd = ctx.createRadialGradient(pos.x, pos.y, NODE_R, pos.x, pos.y, glowR);
-                grd.addColorStop(0, "rgba(255,255,255," + (0.12 + pulse * 0.08) + ")");
+                var grd = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR);
+                grd.addColorStop(0, "rgba(255,255,255," + (0.35 + pulse * 0.15) + ")");
                 grd.addColorStop(1, "rgba(255,255,255,0)");
                 ctx.fillStyle = grd; ctx.fill();
-            }
-
-                        ctx.beginPath(); ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
-            if (isCurrent) {
-                ctx.fillStyle = "rgba(255,255,255,0.95)";
-                ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 3;
-                ctx.shadowColor = "#ffffff";
-                ctx.shadowBlur = 24 + pulse * 12;
             } else if (isSelected) {
-                ctx.fillStyle = "rgba(220,220,235,0.7)";
-                ctx.strokeStyle = "#e0e0f0";
-                ctx.lineWidth = 2.5;
-                ctx.shadowColor = "rgba(255,255,255,0.3)";
-                ctx.shadowBlur = 8;
+                var glowR2 = NODE_R + 12 + pulse * 4;
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR2, 0, Math.PI * 2);
+                var grd2 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR2);
+                grd2.addColorStop(0, "rgba(255,255,255,0.2)");
+                grd2.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = grd2; ctx.fill();
             } else if (onPath) {
-                ctx.fillStyle = "rgba(200,200,220,0.6)";
-                ctx.strokeStyle = "rgba(220,220,235,0.9)";
-                ctx.lineWidth = 2;
-                ctx.shadowBlur = 0;
-            } else {
-                ctx.fillStyle = "rgba(160,160,180,0.5)";
-                ctx.strokeStyle = "rgba(180,180,200,0.6)";
-                ctx.lineWidth = 1.5;
-                ctx.shadowBlur = 0;
+                var glowR3 = NODE_R + 6;
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR3, 0, Math.PI * 2);
+                var grd3 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR3);
+                grd3.addColorStop(0, "rgba(255,255,255,0.1)");
+                grd3.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = grd3; ctx.fill();
             }
-            ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
 
+            // 实心圆（所有节点统一纯白）
+            ctx.beginPath(); ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffffff";
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // 文字（黑字写在白圆上方）
+            ctx.fillStyle = "#000000";
+            ctx.font = "bold 10px sans-serif";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            label = node.name.length > 5 ? node.name.slice(0, 4) + "…" : node.name;
+            ctx.fillText(label, pos.x, pos.y);
+
+            // 节点下方全名（白字）
             ctx.fillStyle = isCurrent ? "#ffffff" : onPath ? "rgba(230,230,240,0.9)" : "rgba(160,160,175,0.7)";
             ctx.font = isCurrent ? "bold 11px sans-serif" : "11px sans-serif";
-            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            ctx.textBaseline = "top";
             label = node.name.length > 12 ? node.name.slice(0, 11) + "…" : node.name;
             ctx.fillText(label, pos.x, pos.y + NODE_R + 7);
         }
@@ -721,7 +724,7 @@
         if (!isEnabled()) { var old = document.getElementById("tlg-menu-btn"); if (old) old.remove(); return; }
         var menu = document.getElementById("extensionsMenu"); if (!menu) return; if (document.getElementById("tlg-menu-btn")) return;
         var btn = document.createElement("div"); btn.id = "tlg-menu-btn"; btn.className = "list-group-item flex-container flexGap5 interactable"; btn.style.cursor = "pointer";
-        btn.innerHTML = '<i class="fa-solid fa-water"></i><span>🌊 河岸凝视</span>';
+        btn.innerHTML = '<i class="fa-solid fa-water" style="color:#ffffff;text-shadow:0 0 4px rgba(0,0,0,0.8);"></i><span style="color:#ffffff;font-weight:900;text-shadow:1px 1px 3px #000000, 0 0 8px rgba(0,0,0,0.6);letter-spacing:1px;">河岸凝视</span>';
         btn.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); var p = document.getElementById("tlg-panel"); if (p && p.style.display === "flex") closePanel(); else openPanel(); });
         menu.appendChild(btn);
     }
