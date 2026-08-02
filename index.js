@@ -215,7 +215,7 @@
     function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
         var apiUrl = (globalApi.apiUrl || "").trim();
-        if (apiUrl && globalApi.autoMode) {
+        if (apiUrl) {
             var st = getST();
             if (st && st.chat) {
                 var visible = st.chat.filter(function (m) { return !m.is_hidden; });
@@ -329,13 +329,6 @@
             ctx.fillStyle = "#ffffff";
             ctx.fill();
             ctx.shadowBlur = 0;
-
-            // 文字（黑字写在白圆上方）
-            ctx.fillStyle = "#000000";
-            ctx.font = "bold 10px sans-serif";
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            label = node.name.length > 5 ? node.name.slice(0, 4) + "…" : node.name;
-            ctx.fillText(label, pos.x, pos.y);
 
             // 节点下方全名（白字）
             ctx.fillStyle = isCurrent ? "#ffffff" : onPath ? "rgba(230,230,240,0.9)" : "rgba(160,160,175,0.7)";
@@ -618,7 +611,7 @@
 
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return; var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
-        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:'result',-apple-system,sans-serif;
         panel.innerHTML = '<div id="tlg-tabs"><div class="tlg-tab active" data-tab="tree">命运分支线</div><div class="tlg-tab" data-tab="archive">观测坐标</div><div class="tlg-tab" data-tab="summary">因果档案</div><div class="tlg-tab" data-tab="worlds">诸世界</div><div class="tlg-tab" data-tab="engine">引擎核心</div><div id="tlg-close">✕</div></div><div id="tlg-body">' +
             '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
             '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">全部锚定坐标</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div><div id="tlg-archive-list"></div></div></div>' +
