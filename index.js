@@ -151,7 +151,6 @@
                 }
                 if (worldId) setLinkedWorldId(worldId);
             }
-                    updateInjection();
         }
         if (worldId && worlds[worldId]) {
             currentWorldId = worldId;
@@ -164,6 +163,7 @@
             currentWorldId = null;
             resetState();
         }
+		updateInjectionWithVector();
     }
 
     // 保存当前 state 回世界
@@ -175,7 +175,7 @@
         worlds[currentWorldId].currentNodeId = state.currentNodeId;
         worlds[currentWorldId].updatedAt = Date.now();
         saveWorlds();
-		updateInjection();
+		updateInjectionWithVector();
     }
 
     // 确保当前聊天有世界（锚定时自动创建）
@@ -596,9 +596,30 @@
         if (!/\/v\d+/.test(url)) url += "/v1";
         return url + path;
     }
-    
+	
+        // ── 基础注入（取最近3条）──
+    function updateInjection() {
+        var st = getST();
+        if (!st || typeof st.setExtensionPrompt !== "function") return;
+        if (!state.summaries || !state.summaries.length) {
+            st.setExtensionPrompt(EXT_NAME, "", 1, 4);
+            return;
+        }
+        var count = Math.min(3, state.summaries.length);
+        var recent = state.summaries.slice(-count);
+        var template = globalApi.vectorPrompt || "";
+        var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
+        var injectionText;
+        if (template && template.indexOf("{{context}}") !== -1) {
+            injectionText = template.replace("{{context}}", content);
+        } else {
+            injectionText = "以下为已记录的近期因果档案：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
+        }
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 4);
+    }
+
     // ── 总结自动注入 AI 上下文 加向量检索──
-        function updateInjectionWithVector() {
+    function updateInjectionWithVector() {
         var st = getST();
         if (!st || typeof st.setExtensionPrompt !== "function") return;
         if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 4); return; }
@@ -650,7 +671,6 @@
         }).catch(function () { updateInjection(); }); // 失败降级
     }
 
-    
     function runSummary() {
         var apiUrl = (globalApi.apiUrl || "").trim();
         var apiKey = (globalApi.apiKey || "").trim();
