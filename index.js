@@ -298,7 +298,7 @@
         backdrop.className = "tlg-modal-backdrop";
         backdrop.id = "tlg-anchor-modal";
         // ★ 回退为简单的居中，移除动态检查
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
         backdrop.innerHTML =
             '<div class="tlg-modal">' +
             '<div class="tlg-modal-title">⚓ 创建锚定点</div>' +
@@ -683,7 +683,43 @@
                     (m === state.settings.model ? " selected" : "") + ">" + escHtml(m) + "</option>";
             }).join("");
     }
-
+function fetchVectorModelList() {
+    var apiUrl = (state.settings.vectorUrl || "").trim();
+    var apiKey = (state.settings.vectorKey || "").trim();
+    if (!apiUrl) { toast("请先设置向量 API 地址。"); return; }
+    var btn = document.getElementById("tlg-fetch-vec-models");
+    if (btn) btn.disabled = true;
+    toast("正在拉取向量模型列表…");
+    fetch(buildEndpoint(apiUrl, "/models"), {
+        headers: apiKey ? { Authorization: "Bearer " + apiKey } : {}
+    }).then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+    }).then(function (data) {
+        var models = (data.data || data.models || []).map(function (m) {
+            return typeof m === "string" ? m : (m.id || m.name || "");
+        }).filter(Boolean);
+        state.settings.vectorModelList = models;
+        saveToMetadata();
+        saveGlobalSettings();
+        populateVectorModelSelect();
+        toast("已加载 " + models.length + " 个向量模型。");
+    }).catch(function (e) {
+        toast("拉取向量模型失败: " + e.message);
+    }).then(function () {
+        if (btn) btn.disabled = false;
+    });
+}
+function populateVectorModelSelect() {
+    var sel = document.getElementById("tlg-vec-model-select");
+    if (!sel) return;
+    var list = state.settings.vectorModelList || [];
+    sel.innerHTML = '<option value="">-- 选择模型 --</option>' +
+        list.map(function (m) {
+            return '<option value="' + escHtml(m) + '"' +
+                (m === state.settings.vectorModel ? " selected" : "") + ">" + escHtml(m) + "</option>";
+        }).join("");
+}
     // ── 打开面板 ──
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return;
@@ -749,12 +785,16 @@
             '<label class="tlg-label">或手动输入模型名称</label>' +
             '<input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">向量 API（可选）</div>' +
-            '<label class="tlg-label">向量 API 地址</label>' +
-            '<input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">向量 API 密钥</label>' +
-            '<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">向量模型</label>' +
-            '<input class="tlg-input" id="tlg-vec-model" placeholder="text-embedding-3-small" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
+'<label class="tlg-label">向量 API 地址</label><div class="tlg-row">' +
+'<input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" />' +
+'<button type="button" class="tlg-btn" id="tlg-test-vec-api">测试</button></div>' +
+'<label class="tlg-label">向量 API 密钥</label>' +
+'<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:12px" />' +
+'<label class="tlg-label">向量模型</label><div class="tlg-row">' +
+'<select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select>' +
+'<button type="button" class="tlg-btn" id="tlg-fetch-vec-models">拉取列表</button></div>' +
+'<label class="tlg-label">或手动输入模型名称</label>' +
+'<input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">检索提示词模板</label>' +
             '<textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + "</textarea></div>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important">保存引擎设置</button>' +
@@ -803,7 +843,7 @@
         if (name === "tree") setTimeout(function () { renderCanvas(); }, 50);
         else if (name === "archive") refreshArchive();
         else if (name === "summary") refreshSummary();
-        else if (name === "engine") populateModelSelect();
+        else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); }
     }
 
     function bindPanelEvents(panel) {
@@ -852,7 +892,9 @@
             state.settings.apiKey = document.getElementById("tlg-api-key").value.trim();
             state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
             state.settings.vectorKey = document.getElementById("tlg-vec-key").value.trim();
-            state.settings.vectorModel = document.getElementById("tlg-vec-model").value.trim();
+            var vecManual = document.getElementById("tlg-vec-model").value.trim();
+var vecSel = document.getElementById("tlg-vec-model-select").value;
+state.settings.vectorModel = vecManual || vecSel;
             state.settings.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
             var manual = document.getElementById("tlg-model-manual").value.trim();
             var sel = document.getElementById("tlg-model-select").value;
@@ -874,7 +916,38 @@
         document.getElementById("tlg-model-select").addEventListener("change", function () {
             if (this.value) document.getElementById("tlg-model-manual").value = this.value;
         });
+        document.getElementById("tlg-vec-model-select").addEventListener("change", function () {
+    if (this.value) document.getElementById("tlg-vec-model").value = this.value;
+});
 
+document.getElementById("tlg-fetch-vec-models").addEventListener("click", function () {
+    flashBtn(this);
+    state.settings.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
+    state.settings.vectorKey = document.getElementById("tlg-vec-key").value.trim();
+    saveToMetadata();
+    saveGlobalSettings();
+    fetchVectorModelList();
+});
+
+document.getElementById("tlg-test-vec-api").addEventListener("click", function () {
+    var self = this;
+    var url = document.getElementById("tlg-vec-url").value.trim();
+    var key = document.getElementById("tlg-vec-key").value.trim();
+    if (!url) { toast("请先输入向量 API 地址。"); return; }
+    flashBtn(self);
+    state.settings.vectorUrl = url;
+    state.settings.vectorKey = key;
+    saveToMetadata();
+    saveGlobalSettings();
+    toast("正在测试…");
+    fetch(buildEndpoint(url, "/models"), {
+        headers: key ? { Authorization: "Bearer " + key } : {}
+    }).then(function (res) {
+        toast(res.ok ? "✓ 向量 API 可达。" : ("✗ HTTP " + res.status));
+    }).catch(function (e) {
+        toast("✗ " + e.message);
+    });
+});
         document.getElementById("tlg-test-api").addEventListener("click", function () {
             var self = this;
             var url = document.getElementById("tlg-api-url").value.trim();
