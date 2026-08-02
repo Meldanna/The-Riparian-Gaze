@@ -295,7 +295,7 @@
             ctx.stroke(); ctx.shadowBlur = 0;
         }
 
-                for (i = 0; i < state.nodes.length; i++) {
+                        for (i = 0; i < state.nodes.length; i++) {
             node = state.nodes[i]; pos = positions[node.id]; if (!pos) continue;
             isCurrent = node.id === state.currentNodeId; isSelected = node.id === state.selectedNodeId;
             onPath = path.indexOf(node.id) !== -1;
