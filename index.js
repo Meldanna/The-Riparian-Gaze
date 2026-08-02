@@ -181,12 +181,40 @@
         while (cur) { path.unshift(cur.id); cur = findNode(cur.parentId); }
         return path;
     }
-    function getMVUStatData() {
-        try { var st = getST(); if (st && st.chat_metadata && st.chat_metadata.stat_data != null) return JSON.parse(JSON.stringify(st.chat_metadata.stat_data)); } catch (e) {} return null;
+        function getMVUStatData() {
+        try {
+            var st = getST(); if (!st || !st.chat_metadata) return null;
+            var cm = st.chat_metadata;
+            // 尝试多个可能的 MVU 存储路径
+            var data = null;
+            if (cm.variables && cm.variables.stat_data != null) data = cm.variables.stat_data;
+            else if (cm.stat_data != null) data = cm.stat_data;
+            else if (cm.script_variables && cm.script_variables.stat_data != null) data = cm.script_variables.stat_data;
+            // 如果 getAllVariables 可用，优先使用
+            if (!data && typeof window.getAllVariables === "function") {
+                var all = window.getAllVariables();
+                if (all && all.stat_data != null) data = all.stat_data;
+            }
+            return data ? JSON.parse(JSON.stringify(data)) : null;
+        } catch (e) { return null; }
     }
     function setMVUStatData(data) {
         if (data == null) return;
-        try { var st = getST(); if (st && st.chat_metadata) { st.chat_metadata.stat_data = JSON.parse(JSON.stringify(data)); if (typeof st.saveMetadata === "function") st.saveMetadata(); } } catch (e) {}
+        try {
+            var st = getST(); if (!st || !st.chat_metadata) return;
+            var cm = st.chat_metadata;
+            // 写回到读取时发现的同一个位置
+            if (cm.variables && typeof cm.variables === "object") {
+                cm.variables.stat_data = JSON.parse(JSON.stringify(data));
+            } else if (cm.stat_data !== undefined) {
+                cm.stat_data = JSON.parse(JSON.stringify(data));
+            } else {
+                // 默认写到 variables
+                if (!cm.variables) cm.variables = {};
+                cm.variables.stat_data = JSON.parse(JSON.stringify(data));
+            }
+            if (typeof st.saveMetadata === "function") st.saveMetadata();
+        } catch (e) {}
     }
     function applyVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
@@ -758,10 +786,10 @@
         try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
-                    if (!globalApi.autoMode || !isEnabled()) return;
+                                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
+                    if (!isEnabled()) return;
                     state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + 1;
-                    if (state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) { state.turnsSinceAnchor = 0; runSummary(true); }
+                    if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) { state.turnsSinceAnchor = 0; runSummary(true); }
                     saveCurrentWorld();
                 });
                 ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () { var p = document.getElementById("tlg-panel"); if (p) p.remove(); document.body.style.overflow = ""; });
