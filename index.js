@@ -1,4 +1,4 @@
-/* 河岸凝视 v3.1 */
+/* 河岸凝视 v3.2 */
 (function () {
     "use strict";
 
@@ -14,17 +14,15 @@
         _lastChatLen: 0
     };
 
-    // ── 全局 API 设置（跨世界共享，存 extension_settings）──
     var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
-        summaryFilterMode: true,  
+        summaryFilterMode: true,
         autoMode: false, autoInterval: 10, lastNMessages: 5
     };
 
-    // ── 诸世界数据 ──
     var worlds = {};
     var currentWorldId = null;
     var canvas = null, ctx = null;
@@ -58,7 +56,7 @@
     }
 
     // ══════════════════════════════════════
-    // 存储层：extension_settings + chat_metadata 指针
+    // 存储层
     // ══════════════════════════════════════
     function getExtSettings() {
         var st = getST();
@@ -74,10 +72,8 @@
     function isEnabled() { try { return getExtSettings().enabled !== false; } catch (e) { return true; } }
     function setEnabled(on) {
         try {
-            getExtSettings().enabled = !!on;
-            saveExtSettings();
-            if (!on) closePanel();
-            injectMenuButton();
+            getExtSettings().enabled = !!on; saveExtSettings();
+            if (!on) closePanel(); injectMenuButton();
             var toggle = document.getElementById("tlg_enable_toggle");
             if (toggle) toggle.classList.toggle("on", !!on);
         } catch (e) {}
@@ -181,41 +177,56 @@
         while (cur) { path.unshift(cur.id); cur = findNode(cur.parentId); }
         return path;
     }
-        function getMVUStatData() {
+
+    // ══════════════════════════════════════
+    // ① MVU 变量读写 —— 修复版
+    //   优先用酒馆暴露的全局函数，再 fallback 到 chat_metadata 各路径
+    // ══════════════════════════════════════
+    function getMVUStatData() {
         try {
+            // 最可靠：酒馆全局函数
+            if (typeof window.getVariable === "function") {
+                var v = window.getVariable("stat_data");
+                if (v != null) return JSON.parse(JSON.stringify(v));
+            }
+            if (typeof window.getAllVariables === "function") {
+                var all = window.getAllVariables();
+                if (all && all.stat_data != null) return JSON.parse(JSON.stringify(all.stat_data));
+            }
+            // fallback：直接读 chat_metadata 的多个可能路径
             var st = getST(); if (!st || !st.chat_metadata) return null;
             var cm = st.chat_metadata;
-            // 尝试多个可能的 MVU 存储路径
-            var data = null;
-            if (cm.variables && cm.variables.stat_data != null) data = cm.variables.stat_data;
-            else if (cm.stat_data != null) data = cm.stat_data;
-            else if (cm.script_variables && cm.script_variables.stat_data != null) data = cm.script_variables.stat_data;
-            // 如果 getAllVariables 可用，优先使用
-            if (!data && typeof window.getAllVariables === "function") {
-                var all = window.getAllVariables();
-                if (all && all.stat_data != null) data = all.stat_data;
-            }
-            return data ? JSON.parse(JSON.stringify(data)) : null;
-        } catch (e) { return null; }
+            if (cm.variables && cm.variables.stat_data != null) return JSON.parse(JSON.stringify(cm.variables.stat_data));
+            if (cm.script_variables && cm.script_variables.stat_data != null) return JSON.parse(JSON.stringify(cm.script_variables.stat_data));
+            if (cm.stat_data != null) return JSON.parse(JSON.stringify(cm.stat_data));
+        } catch (e) {}
+        return null;
     }
     function setMVUStatData(data) {
         if (data == null) return;
         try {
+            // 优先用酒馆全局函数写
+            if (typeof window.setVariable === "function") {
+                window.setVariable("stat_data", data);
+                return; // 酒馆自己会 saveMetadata
+            }
             var st = getST(); if (!st || !st.chat_metadata) return;
             var cm = st.chat_metadata;
-            // 写回到读取时发现的同一个位置
+            // 写回到读取时发现的同一个位置，保持一致
             if (cm.variables && typeof cm.variables === "object") {
                 cm.variables.stat_data = JSON.parse(JSON.stringify(data));
+            } else if (cm.script_variables && typeof cm.script_variables === "object") {
+                cm.script_variables.stat_data = JSON.parse(JSON.stringify(data));
             } else if (cm.stat_data !== undefined) {
                 cm.stat_data = JSON.parse(JSON.stringify(data));
             } else {
-                // 默认写到 variables
                 if (!cm.variables) cm.variables = {};
                 cm.variables.stat_data = JSON.parse(JSON.stringify(data));
             }
             if (typeof st.saveMetadata === "function") st.saveMetadata();
         } catch (e) {}
     }
+
     function applyVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
         var pathIds = getPathToRoot(targetNodeId); var pathNodes = pathIds.map(findNode).filter(Boolean);
@@ -230,6 +241,7 @@
         for (i = 0; i < st.chat.length; i++) { if (visible[i]) delete st.chat[i].is_hidden; else st.chat[i].is_hidden = true; }
         if (typeof st.saveChat === "function") st.saveChat();
     }
+
     function createAnchor(name, brief) {
         var st = getST(); if (!st) return; ensureWorldExists();
         var msgIdx = st.chat ? Math.max(0, st.chat.length - 1) : 0;
@@ -240,20 +252,39 @@
         state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("⚓ 已锚定: " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
+
+    // ══════════════════════════════════════
+    // ② 跳转 —— 修复版
+    //   先收集当前可见消息用于总结，再执行跳转，时序正确
+    // ══════════════════════════════════════
     function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
+        var st = getST();
+
+        // 收集跳转前的对话用于自动总结（在 applyVisibility 改变可见性之前）
+        var preJumpMessages = null;
         var apiUrl = (globalApi.apiUrl || "").trim();
-        if (apiUrl) {
-            var st = getST();
-            if (st && st.chat) {
-                var visible = st.chat.filter(function (m) { return !m.is_hidden; });
-                if (visible.length > 0 && state.turnsSinceAnchor > 0) runSummary(true);
+        if (apiUrl && st && st.chat && state.turnsSinceAnchor > 0) {
+            var visible = st.chat.filter(function (m) { return !m.is_hidden; });
+            if (visible.length > 0) {
+                preJumpMessages = visible.slice(-(globalApi.autoInterval || 10));
             }
         }
+
+        // 恢复 MVU 快照
         if (node.statData != null) setMVUStatData(node.statData);
-        applyVisibility(nodeId); state.currentNodeId = nodeId; state.turnsSinceAnchor = 0;
+
+        // 调整消息可见性
+        applyVisibility(nodeId);
+        state.currentNodeId = nodeId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("↩ 已跳转至: " + node.name); renderCanvas(); refreshArchive(); closeBriefPanel();
+
+        // 用跳转前收集的消息做总结（异步，不阻塞跳转）
+        if (preJumpMessages && preJumpMessages.length > 0) {
+            runSummaryWithMessages(preJumpMessages);
+        }
     }
+
     function showAnchorModal(prefillName) {
         if (!isEnabled()) { toast("河岸凝视已关闭。"); return; }
         var existing = document.getElementById("tlg-anchor-modal"); if (existing) existing.remove();
@@ -267,8 +298,9 @@
         backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
         setTimeout(function () { nameInput.focus(); }, 80);
     }
-    // ── 画布与观测动效 ──
-    var ripple = null; 
+
+    // ── 画布 ──
+    var ripple = null;
     function triggerRipple(worldX, worldY) { ripple = { x: worldX, y: worldY, startTime: Date.now() }; }
 
     function layoutTree() {
@@ -300,14 +332,13 @@
         ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, rect.width, rect.height);
         ctx.save(); ctx.translate(rect.width / 2 + camX, rect.height / 2 + camY); ctx.scale(camZoom, camZoom);
         var positions = layoutTree(), NODE_R = 22, path = getPathToRoot(state.currentNodeId);
-        var i, node, from, to, pos, isCurrent, isSelected, onPath, isActive, cy, label;
-
-        var pulse = (Math.sin(Date.now() / 800) + 1) / 2; 
+        var i, node, from, to, pos, isCurrent, isSelected, onPath, cy, label;
+        var pulse = (Math.sin(Date.now() / 800) + 1) / 2;
 
         for (i = 0; i < state.nodes.length; i++) {
             node = state.nodes[i]; if (!node.parentId) continue;
             from = positions[node.parentId]; to = positions[node.id]; if (!from || !to) continue;
-            isActive = path.indexOf(node.id) !== -1 && path.indexOf(node.parentId) !== -1;
+            var isActive = path.indexOf(node.id) !== -1 && path.indexOf(node.parentId) !== -1;
             ctx.beginPath(); ctx.moveTo(from.x, from.y + NODE_R);
             cy = (from.y + to.y) / 2;
             ctx.bezierCurveTo(from.x, cy, to.x, cy, to.x, to.y - NODE_R);
@@ -317,18 +348,16 @@
                 ctx.shadowColor = "rgba(255,255,255," + (0.4 + pulse * 0.2) + ")";
                 ctx.shadowBlur = 8 + pulse * 6;
             } else {
-                ctx.strokeStyle = "rgba(140,140,160,0.4)";
-                ctx.lineWidth = 2; ctx.shadowBlur = 0;
+                ctx.strokeStyle = "rgba(140,140,160,0.4)"; ctx.lineWidth = 2; ctx.shadowBlur = 0;
             }
             ctx.stroke(); ctx.shadowBlur = 0;
         }
 
-                        for (i = 0; i < state.nodes.length; i++) {
+        for (i = 0; i < state.nodes.length; i++) {
             node = state.nodes[i]; pos = positions[node.id]; if (!pos) continue;
             isCurrent = node.id === state.currentNodeId; isSelected = node.id === state.selectedNodeId;
             onPath = path.indexOf(node.id) !== -1;
 
-            // 光晕层（只有路径/选中/当前才有）
             if (isCurrent) {
                 var glowR = NODE_R + 18 + pulse * 10;
                 ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR, 0, Math.PI * 2);
@@ -340,47 +369,38 @@
                 var glowR2 = NODE_R + 12 + pulse * 4;
                 ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR2, 0, Math.PI * 2);
                 var grd2 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR2);
-                grd2.addColorStop(0, "rgba(255,255,255,0.2)");
-                grd2.addColorStop(1, "rgba(255,255,255,0)");
+                grd2.addColorStop(0, "rgba(255,255,255,0.2)"); grd2.addColorStop(1, "rgba(255,255,255,0)");
                 ctx.fillStyle = grd2; ctx.fill();
             } else if (onPath) {
                 var glowR3 = NODE_R + 6;
                 ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR3, 0, Math.PI * 2);
                 var grd3 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR3);
-                grd3.addColorStop(0, "rgba(255,255,255,0.1)");
-                grd3.addColorStop(1, "rgba(255,255,255,0)");
+                grd3.addColorStop(0, "rgba(255,255,255,0.1)"); grd3.addColorStop(1, "rgba(255,255,255,0)");
                 ctx.fillStyle = grd3; ctx.fill();
             }
 
-            // 实心圆（所有节点统一纯白）
             ctx.beginPath(); ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
-            ctx.fillStyle = "#ffffff";
-            ctx.fill();
-            ctx.shadowBlur = 0;
+            ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.shadowBlur = 0;
 
-            // 节点下方全名（白字）
             ctx.fillStyle = isCurrent ? "#ffffff" : onPath ? "rgba(230,230,240,0.9)" : "rgba(160,160,175,0.7)";
             ctx.font = isCurrent ? "bold 11px sans-serif" : "11px sans-serif";
-            ctx.textBaseline = "top";
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
             label = node.name.length > 12 ? node.name.slice(0, 11) + "…" : node.name;
             ctx.fillText(label, pos.x, pos.y + NODE_R + 7);
         }
 
         if (ripple) {
-            var elapsed = (Date.now() - ripple.startTime) / 1000;
-            var maxDur = 0.6;
+            var elapsed = (Date.now() - ripple.startTime) / 1000, maxDur = 0.6;
             if (elapsed < maxDur) {
-                var progress = elapsed / maxDur;
-                var rRadius = progress * 60;
-                var rAlpha = 1 - progress;
+                var progress = elapsed / maxDur, rRadius = progress * 60, rAlpha = 1 - progress;
                 ctx.beginPath(); ctx.arc(ripple.x, ripple.y, rRadius, 0, Math.PI * 2);
                 ctx.strokeStyle = "rgba(255,255,255," + (rAlpha * 0.6) + ")";
-                ctx.lineWidth = 2 * (1 - progress);
-                ctx.stroke();
+                ctx.lineWidth = 2 * (1 - progress); ctx.stroke();
             } else { ripple = null; }
         }
         ctx.restore();
     }
+
     function canvasHitTest(clientX, clientY) {
         if (!canvas) return null;
         var rect = canvas.getBoundingClientRect();
@@ -445,8 +465,9 @@
         if (!state.summaries || !state.summaries.length) {
             list.innerHTML = '<div style="color:#5a5a6a;padding:40px 12px;text-align:center;font-style:italic;letter-spacing:1px;">虚空寂寂，尚无因果被铭刻于此。</div>'; return;
         }
-        var latest = state.summaries[state.summaries.length - 1]; var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
-        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;font-family:\'Noto Serif SC\',Georgia,serif;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
+        var latest = state.summaries[state.summaries.length - 1];
+        var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
+        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
         document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { openSummaryHistory(); });
     }
 
@@ -472,22 +493,26 @@
         var items = (state.summaries || []).slice().reverse();
         if (keyword) { items = items.filter(function (s) { return (s.text || "").toLowerCase().indexOf(keyword) !== -1; }); }
         var countEl = document.getElementById("tlg-sh-count"); if (countEl) countEl.textContent = items.length + " 条";
-        if (!items.length) { listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return; }
+        if (!items.length) {
+            listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return;
+        }
         listWrap.innerHTML = items.map(function (s, displayIdx) {
-            var realIdx = state.summaries.length - 1 - displayIdx;
-            if (keyword) { realIdx = state.summaries.lastIndexOf(s); }
-            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-family:\'Noto Serif SC\',Georgia,serif;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
+            var realIdx = state.summaries.indexOf(s);
+            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
         }).join("");
         listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                var idx = Number(btn.dataset.idx), textDiv = document.getElementById("tlg-sh-text-" + idx), editArea = document.getElementById("tlg-sh-editarea-" + idx);
+                var idx = Number(btn.dataset.idx);
+                var textDiv = document.getElementById("tlg-sh-text-" + idx);
+                var editArea = document.getElementById("tlg-sh-editarea-" + idx);
                 if (textDiv) textDiv.style.display = "none"; if (editArea) editArea.style.display = "block"; btn.style.display = "none";
             });
         });
         listWrap.querySelectorAll(".tlg-sh-save").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                flashBtn(this); var idx = Number(btn.dataset.idx), ta = document.getElementById("tlg-sh-ta-" + idx);
-                if (ta) state.summaries[idx].text = ta.value; saveCurrentWorld(); refreshSummary();
+                flashBtn(this); var idx = Number(btn.dataset.idx); var ta = document.getElementById("tlg-sh-ta-" + idx);
+                if (ta && state.summaries[idx]) state.summaries[idx].text = ta.value;
+                saveCurrentWorld(); refreshSummary();
                 var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("档案已更新。");
             });
         });
@@ -499,7 +524,8 @@
             });
         });
     }
-    // ── AI 接口与背景任务 ──
+
+    // ── AI 接口 ──
     function updateInjection() {
         var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
         if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 6); return; }
@@ -537,7 +563,8 @@
             }).then(function (r2) { return r2.json(); }).then(function (data2) {
                 var embeddings = (data2.data || []).map(function (d) { return d.embedding; });
                 var scored = embeddings.map(function (emb, idx) {
-                    var dot = 0, na = 0, nb = 0; for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
+                    var dot = 0, na = 0, nb = 0;
+                    for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
                     return { idx: idx, score: dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8) };
                 }).sort(function (a, b) { return b.score - a.score; });
                 var top = scored.slice(0, 3);
@@ -555,18 +582,19 @@
         if (path === "/models" && /\/models$/.test(url)) return url;
         if (!/\/v\d+/.test(url)) url += "/v1"; return url + path;
     }
-    function runSummary(auto) {
-        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim(), model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
+
+    // ══════════════════════════════════════
+    // ② 总结函数拆分：
+    //   runSummaryWithMessages(messages) —— 传入已收集好的消息数组，用于跳转前自动总结
+    //   runSummary(auto)                 —— 手动/自动触发，取当前可见消息
+    // ══════════════════════════════════════
+    function _doSummaryRequest(messagesArray, auto) {
+        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
+        var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
         if (!apiUrl) { if (!auto) toast("请先在引擎标签页设置 API 地址。"); return; }
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
-        ensureWorldExists();
-        var countEl = document.getElementById("tlg-manual-count");
-        var count = auto ? (globalApi.autoInterval || 10) : (countEl ? Math.max(1, parseInt(countEl.value, 10) || 20) : 20);
-        var visible = st.chat.filter(function (m) { return !m.is_hidden; });
-        var recent = visible.slice(-count);
-        if (!recent.length) { if (!auto) toast("没有可用的可见消息。"); return; }
-        var recentChat = recent.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
-        var prompt = (summaryPrompt || "").replace("{{context}}", recentChat);
+        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); return; }
+        var recentChat = messagesArray.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
+        var prompt = summaryPrompt.replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run"); if (btn) btn.disabled = true;
         if (!auto) toast("正在执行状态切片…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
@@ -582,6 +610,22 @@
         }).catch(function (e) { if (!auto) toast("提取失败: " + e.message); })
         .then(function () { if (btn) btn.disabled = false; });
     }
+
+    function runSummaryWithMessages(messagesArray) {
+        // 跳转前调用，传入跳转前收集的消息，异步执行，auto=true 静默运行
+        _doSummaryRequest(messagesArray, true);
+    }
+
+    function runSummary(auto) {
+        var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
+        ensureWorldExists();
+        var countEl = document.getElementById("tlg-manual-count");
+        var count = auto ? (globalApi.autoInterval || 10) : (countEl ? Math.max(1, parseInt(countEl.value, 10) || 20) : 20);
+        var visible = st.chat.filter(function (m) { return !m.is_hidden; });
+        var recent = visible.slice(-count);
+        _doSummaryRequest(recent, auto);
+    }
+
     function fetchModelList() {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         if (!apiUrl) { toast("请先设置 API 地址。"); return; }
@@ -632,14 +676,22 @@
         input.onchange = function () {
             var file = input.files[0]; if (!file) return; var reader = new FileReader();
             reader.onload = function () {
-                try { var data = JSON.parse(reader.result); if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据。"); return; } var wid = data.id || generateId(); if (worlds[wid]) wid = generateId(); data.id = wid; if (!data.name) data.name = file.name.replace(/\.json$/, ""); if (!data.createdAt) data.createdAt = Date.now(); data.updatedAt = Date.now(); worlds[wid] = data; saveWorlds(); refreshWorlds(); toast("连接建立: " + data.name); } catch (e) { toast("维度侵入失败: " + e.message); }
+                try {
+                    var data = JSON.parse(reader.result);
+                    if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据。"); return; }
+                    var wid = data.id || generateId(); if (worlds[wid]) wid = generateId();
+                    data.id = wid; if (!data.name) data.name = file.name.replace(/\.json$/, "");
+                    if (!data.createdAt) data.createdAt = Date.now(); data.updatedAt = Date.now();
+                    worlds[wid] = data; saveWorlds(); refreshWorlds(); toast("连接建立: " + data.name);
+                } catch (e) { toast("维度侵入失败: " + e.message); }
             }; reader.readAsText(file);
         }; input.click();
     }
 
     function ensurePanelBuilt() {
-        if (document.getElementById("tlg-panel")) return; var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
-        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:'result',-apple-system,sans-serif;overflow:hidden;";
+        if (document.getElementById("tlg-panel")) return;
+        var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
         panel.innerHTML = '<div id="tlg-tabs"><div class="tlg-tab active" data-tab="tree">命运分支线</div><div class="tlg-tab" data-tab="archive">观测坐标</div><div class="tlg-tab" data-tab="summary">因果档案</div><div class="tlg-tab" data-tab="worlds">诸世界</div><div class="tlg-tab" data-tab="engine">引擎核心</div><div id="tlg-close">✕</div></div><div id="tlg-body">' +
             '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
             '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">全部锚定坐标</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div><div id="tlg-archive-list"></div></div></div>' +
@@ -665,7 +717,7 @@
         var panel = document.getElementById("tlg-panel"); if (!panel) return;
         panel.querySelectorAll(".tlg-tab").forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-tab") === name); });
         panel.querySelectorAll(".tlg-view").forEach(function (v) { var on = v.getAttribute("data-view") === name; v.classList.toggle("active", on); v.style.display = on ? "flex" : "none"; });
-        if (name === "tree") { setTimeout(function(){}, 50); } else if (name === "archive") refreshArchive(); else if (name === "summary") refreshSummary(); else if (name === "worlds") refreshWorlds(); else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); }
+        if (name === "archive") refreshArchive(); else if (name === "summary") refreshSummary(); else if (name === "worlds") refreshWorlds(); else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); }
     }
 
     function bindPanelEvents(panel) {
@@ -682,7 +734,15 @@
         document.getElementById("tlg-summary-prompt").addEventListener("change", function () { globalApi.summaryPrompt = this.value; saveGlobalApi(); });
         document.getElementById("tlg-summary-run").addEventListener("click", function () { flashBtn(this); runSummary(false); });
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
-            flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim(); globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim(); globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value; globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value; globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value; saveGlobalApi(); toast("引擎设置已锚定。");
+            flashBtn(this);
+            globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim();
+            globalApi.apiKey = document.getElementById("tlg-api-key").value.trim();
+            globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
+            globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
+            globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value;
+            globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
+            globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value;
+            saveGlobalApi(); toast("引擎设置已锚定。");
         });
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
         document.getElementById("tlg-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-model-manual").value = this.value; });
@@ -730,14 +790,14 @@
             if (e.touches.length === 1 && isPanning) { camX = e.touches[0].clientX - panStartX; camY = e.touches[0].clientY - panStartY; }
             else if (e.touches.length === 2) { var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (lastTouchDist > 0) { camZoom = Math.max(0.2, Math.min(4, camZoom * (dist / lastTouchDist))); } lastTouchDist = dist; }
         }, { passive: true });
-        canvas.addEventListener("touchend", function (e) { 
+        canvas.addEventListener("touchend", function (e) {
             if (!touchMoved && touchStartHit) {
                 var rct = canvas.getBoundingClientRect();
                 var wx = (e.changedTouches[0].clientX - rct.left - rct.width / 2 - camX) / camZoom;
                 var wy = (e.changedTouches[0].clientY - rct.top - rct.height / 2 - camY) / camZoom;
                 triggerRipple(wx, wy); openBriefPanel(touchStartHit);
-            } 
-            isPanning = false; touchStartHit = null; 
+            }
+            isPanning = false; touchStartHit = null;
         }, { passive: true });
     }
 
@@ -745,7 +805,7 @@
         if (!isEnabled()) { var old = document.getElementById("tlg-menu-btn"); if (old) old.remove(); return; }
         var menu = document.getElementById("extensionsMenu"); if (!menu) return; if (document.getElementById("tlg-menu-btn")) return;
         var btn = document.createElement("div"); btn.id = "tlg-menu-btn"; btn.className = "list-group-item flex-container flexGap5 interactable"; btn.style.cursor = "pointer";
-        btn.innerHTML = '<i class="fa-solid fa-water" style="color:#ffffff;text-shadow:0 0 4px rgba(0,0,0,0.8);"></i><span style="color:#ffffff;font-weight:900;text-shadow:1px 1px 3px #000000, 0 0 8px rgba(0,0,0,0.6);letter-spacing:1px;">河岸凝视</span>';
+        btn.innerHTML = '<i class="fa-solid fa-water" style="color:#ffffff;text-shadow:0 0 4px rgba(0,0,0,0.8);"></i><span style="color:#ffffff;font-weight:900;text-shadow:1px 1px 3px #000000,0 0 8px rgba(0,0,0,0.6);letter-spacing:1px;">河岸凝视</span>';
         btn.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); var p = document.getElementById("tlg-panel"); if (p && p.style.display === "flex") closePanel(); else openPanel(); });
         menu.appendChild(btn);
     }
@@ -769,8 +829,7 @@
         function toggleFilter() {
             if (!isEnabled()) { toast("未授予观测权限。"); return ""; }
             globalApi.summaryFilterMode = !globalApi.summaryFilterMode; saveGlobalApi(); updateInjectionWithVector();
-            toast(globalApi.summaryFilterMode ? "视野滤镜：仅注视本时间线" : "视野滤镜：俯瞰全部因果纠缠");
-            return "";
+            toast(globalApi.summaryFilterMode ? "视野滤镜：仅注视本时间线" : "视野滤镜：俯瞰全部因果纠缠"); return "";
         }
         if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_filter", function (a, v) { return toggleFilter(); }, [], "切换记忆视野滤镜", true, true); }
         if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
@@ -786,16 +845,21 @@
         try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
+                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
                     if (!isEnabled()) return;
                     state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + 1;
-                    if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) { state.turnsSinceAnchor = 0; runSummary(true); }
+                    if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
+                        state.turnsSinceAnchor = 0; runSummary(true);
+                    }
                     saveCurrentWorld();
                 });
-                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () { var p = document.getElementById("tlg-panel"); if (p) p.remove(); document.body.style.overflow = ""; });
+                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
+                    var p = document.getElementById("tlg-panel"); if (p) p.remove();
+                    canvas = null; ctx = null; document.body.style.overflow = "";
+                });
             }
         } catch (e) {}
-        console.log("[TLG] 河岸凝视(观测仪版) 已上线");
+        console.log("[TLG] 河岸凝视 v3.2 已上线");
     }
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); } else { setTimeout(boot, 300); }
