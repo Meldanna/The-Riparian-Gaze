@@ -20,7 +20,9 @@
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         summaryFilterMode: true,
-        autoMode: false, autoInterval: 10, lastNMessages: 5
+        autoMode: false, autoInterval: 10, lastNMessages: 5,
+        jumpSummary: true,      // 跳转前是否自动总结
+        summaryMaxCount: 100    // 每个世界最多保留的总结条数
     };
 
     var worlds = {};
@@ -264,7 +266,7 @@
         // 收集跳转前的对话用于自动总结（在 applyVisibility 改变可见性之前）
         var preJumpMessages = null;
         var apiUrl = (globalApi.apiUrl || "").trim();
-        if (apiUrl && st && st.chat && state.turnsSinceAnchor > 0) {
+        if (apiUrl && globalApi.jumpSummary && st && st.chat && state.turnsSinceAnchor > 0) {
             var visible = st.chat.filter(function (m) { return !m.is_hidden; });
             if (visible.length > 0) {
                 preJumpMessages = visible.slice(-(globalApi.autoInterval || 10));
@@ -401,6 +403,17 @@
         ctx.restore();
     }
 
+    function centerOnCurrentNode() {
+        var positions = layoutTree();
+        var pos = positions[state.currentNodeId];
+        if (!pos) return;
+        var rect = canvas && canvas.getBoundingClientRect();
+        if (!rect) return;
+        // 把当前节点的世界坐标移到画布中心
+        camX = -pos.x * camZoom;
+        camY = -pos.y * camZoom;
+    }
+
     function canvasHitTest(clientX, clientY) {
         if (!canvas) return null;
         var rect = canvas.getBoundingClientRect();
@@ -427,8 +440,19 @@
         body.querySelector("#tlg-brief-save").onclick = function () {
             flashBtn(this); node.brief = body.querySelector("#tlg-brief-edit").value; saveCurrentWorld(); toast("描述已保存。"); refreshArchive();
         };
-        panel.querySelector(".tlg-brief-footer").innerHTML = '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此因果</button>';
+        panel.querySelector(".tlg-brief-footer").innerHTML =
+            '<button type="button" class="tlg-btn" id="tlg-brief-rename" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-bottom:8px;width:100%!important;">✎ 重命名节点</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此因果</button>';
         panel.querySelector("#tlg-brief-jump").onclick = function () { jumpToNode(nodeId); };
+        panel.querySelector("#tlg-brief-rename").onclick = function () {
+            var newName = prompt("新节点名称：", node.name);
+            if (newName === null) return;
+            newName = newName.trim();
+            if (!newName) return;
+            node.name = newName;
+            panel.querySelector(".tlg-brief-header span").textContent = newName;
+            saveCurrentWorld(); refreshArchive(); renderCanvas(); toast("节点已重命名。");
+        };
     }
     function closeBriefPanel() { var panel = document.getElementById("tlg-brief-panel"); if (panel) panel.classList.remove("open"); state.selectedNodeId = null; }
 
@@ -440,7 +464,9 @@
             var isCurrent = node.id === state.currentNodeId;
             return '<div class="tlg-archive-card ' + (isCurrent ? "current" : "") + '"><div class="tlg-archive-title">' + escHtml(node.name) + (isCurrent ? " <span style='color:#7a7a8a;font-size:11px'>(当前)</span>" : "") + "</div>" +
                 '<div class="tlg-archive-meta">' + new Date(node.timestamp).toLocaleString() + " · 消息 " + node.msgIdx + '</div><div class="tlg-archive-brief">' + escHtml(node.brief || "") + "</div>" +
-                '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tlg-btn tlg-archive-view" data-nid="' + node.id + '">追踪节点</button><button type="button" class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="' + node.id + '">↩ 跳转至此</button><button type="button" class="tlg-btn tlg-btn-danger tlg-archive-del" data-nid="' + node.id + '" style="margin-left:auto">✕</button></div></div>';
+                '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tlg-btn tlg-archive-view" data-nid="' + node.id + '">追踪节点</button><button type="button" class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="' + node.id + '">↩ 跳转至此</button>' +
+                (!isCurrent ? '<button type="button" class="tlg-btn tlg-archive-graft" data-nid="' + node.id + '" title="把此节点嫁接到另一个父节点下">⇢ 嫁接</button>' : '') +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-archive-del" data-nid="' + node.id + '" style="margin-left:auto">✕</button></div></div>';
         }).join("");
         container.querySelectorAll(".tlg-archive-view").forEach(function (btn) { btn.onclick = function () { switchTab("tree"); openBriefPanel(btn.dataset.nid); }; });
         container.querySelectorAll(".tlg-archive-jump").forEach(function (btn) { btn.onclick = function () { jumpToNode(btn.dataset.nid); }; });
@@ -452,12 +478,67 @@
                 deleteNode(btn.dataset.nid);
             };
         });
+        container.querySelectorAll(".tlg-archive-graft").forEach(function (btn) {
+            btn.onclick = function () { showGraftModal(btn.dataset.nid); };
+        });
     }
     function deleteNode(nodeId) {
         var node = findNode(nodeId); if (!node) return; var parent = findNode(node.parentId);
         if (parent) parent.children = parent.children.filter(function (id) { return id !== nodeId; });
         function rm(id) { var n = findNode(id); if (!n) return; n.children.slice().forEach(rm); state.nodes = state.nodes.filter(function (x) { return x.id !== id; }); }
         rm(nodeId); saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
+    }
+
+    // 嫁接：把 nodeId 从当前父节点摘下，挂到 newParentId 下
+    function graftNode(nodeId, newParentId) {
+        if (nodeId === newParentId) { toast("不能嫁接到自身。"); return; }
+        var node = findNode(nodeId); if (!node) return;
+        // 检查 newParentId 不在 nodeId 的子树里（防止成环）
+        function isDescendant(ancestorId, targetId) {
+            var n = findNode(targetId); if (!n) return false;
+            if (n.parentId === ancestorId) return true;
+            return n.parentId ? isDescendant(ancestorId, n.parentId) : false;
+        }
+        if (isDescendant(nodeId, newParentId)) { toast("目标节点是此节点的子孙，无法嫁接（会形成环）。"); return; }
+        // 从旧父节点移除
+        var oldParent = findNode(node.parentId);
+        if (oldParent) oldParent.children = oldParent.children.filter(function (id) { return id !== nodeId; });
+        // 挂到新父节点
+        var newParent = findNode(newParentId);
+        if (!newParent) { toast("目标节点不存在。"); return; }
+        if (newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
+        node.parentId = newParentId;
+        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已嫁接至「" + newParent.name + "」。");
+    }
+
+    function showGraftModal(nodeId) {
+        var node = findNode(nodeId); if (!node) return;
+        var candidates = state.nodes.filter(function (n) { return n.id !== nodeId; });
+        if (!candidates.length) { toast("没有可嫁接的目标节点。"); return; }
+        var existing = document.getElementById("tlg-graft-modal"); if (existing) existing.remove();
+        var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
+        var opts = candidates.map(function (n) {
+            return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + (n.id === node.parentId ? " (当前父节点)" : "") + '</option>';
+        }).join("");
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⇢ 嫁接节点</div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其全部子树，移动到选定的新父节点下。</div>' +
+            '<label class="tlg-label">选择新父节点</label>' +
+            '<select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-graft-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-graft-ok">确认嫁接</button></div></div>';
+        document.body.appendChild(backdrop);
+        // 默认选中当前父节点以外的第一个
+        var sel = backdrop.querySelector("#tlg-graft-target");
+        var nonParent = candidates.find(function (n) { return n.id !== node.parentId; });
+        if (nonParent) sel.value = nonParent.id;
+        backdrop.querySelector("#tlg-graft-cancel").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-graft-ok").onclick = function () {
+            var targetId = sel.value;
+            if (!targetId) { toast("请选择目标节点。"); return; }
+            graftNode(nodeId, targetId);
+            backdrop.remove();
+        };
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
     }
 
     function refreshSummary() {
@@ -605,8 +686,16 @@
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
             if (!state.summaries) state.summaries = [];
             state.summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId });
+            // 总结池上限保护：超出时删除最旧的
+            var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
+            if (state.summaries.length > maxCount) {
+                var trimmed = state.summaries.length - maxCount;
+                state.summaries.splice(0, trimmed);
+                if (!auto) toast("档案记录完成（已自动清理最旧 " + trimmed + " 条）。");
+            } else {
+                if (!auto) toast("档案记录完成。");
+            }
             saveCurrentWorld(); refreshSummary(); updateInjectionWithVector();
-            if (!auto) toast("档案记录完成。");
         }).catch(function (e) { if (!auto) toast("提取失败: " + e.message); })
         .then(function () { if (btn) btn.disabled = false; });
     }
@@ -693,9 +782,9 @@
         var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
         panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
         panel.innerHTML = '<div id="tlg-tabs"><div class="tlg-tab active" data-tab="tree">命运分支线</div><div class="tlg-tab" data-tab="archive">观测坐标</div><div class="tlg-tab" data-tab="summary">因果档案</div><div class="tlg-tab" data-tab="worlds">诸世界</div><div class="tlg-tab" data-tab="engine">引擎核心</div><div id="tlg-close">✕</div></div><div id="tlg-body">' +
-            '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
+            '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-center-cur" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">◎ 定位当前</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
             '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">全部锚定坐标</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div><div id="tlg-archive-list"></div></div></div>' +
-            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div><div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">因果流转每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步自动触发</label></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条上下文黏性</label></div></div><div class="tlg-section"><div class="tlg-section-title">记录仪指令覆写</div><label class="tlg-label">逻辑模板（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea><div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">主动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="20" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步因果痕迹</label></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div><div class="tlg-section"><div class="tlg-section-title">观测档案库</div><div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">查阅已记录的因果碎片，包含抹除与覆写权限。</div><div id="tlg-summary-list"></div></div></div></div>' +
+            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div><div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式（按步数）</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">因果流转每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步自动触发</label></div><div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条上下文黏性</label></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案库上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条（超出自动清理最旧）</label></div></div><div class="tlg-section"><div class="tlg-section-title">记录仪指令覆写</div><label class="tlg-label">逻辑模板（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea><div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">主动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="20" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步因果痕迹</label></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div><div class="tlg-section"><div class="tlg-section-title">观测档案库</div><div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">查阅已记录的因果碎片，包含抹除与覆写权限。</div><div id="tlg-summary-list"></div></div></div></div>' +
             '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">维度图谱</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-worlds-import" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">凝望异世界</button></div><div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">当前实体连接: ' + escHtml(getCurrentChatId() || "未知") + (currentWorldId ? " → " + escHtml((worlds[currentWorldId] || {}).name || "") : " (未建立)") + '</div><div id="tlg-worlds-list"></div></div></div>' +
             '<div class="tlg-view" data-view="engine"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">主解析引擎</div><label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div><div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div><label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" /><label class="tlg-label">联想提示词指令</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">锁定核心配置</button></div></div></div>';
         document.body.appendChild(panel); bindPanelEvents(panel);
@@ -725,12 +814,15 @@
         panel.querySelectorAll(".tlg-tab").forEach(function (tab) { tab.onclick = function () { switchTab(tab.getAttribute("data-tab")); }; });
         document.getElementById("tlg-brief-close").onclick = closeBriefPanel;
         document.getElementById("tlg-canvas-anchor").onclick = function () { showAnchorModal(); };
+        document.getElementById("tlg-canvas-center-cur").onclick = function () { centerOnCurrentNode(); };
         document.getElementById("tlg-canvas-reset-view").onclick = function () { camX = 0; camY = 0; camZoom = 1; };
         document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
         document.getElementById("tlg-worlds-import").addEventListener("click", importWorld);
         document.getElementById("tlg-auto-toggle").addEventListener("click", function () { globalApi.autoMode = !globalApi.autoMode; this.classList.toggle("on", globalApi.autoMode); saveGlobalApi(); });
         document.getElementById("tlg-auto-interval").addEventListener("change", function () { globalApi.autoInterval = Math.max(1, parseInt(this.value, 10) || 10); saveGlobalApi(); });
+        document.getElementById("tlg-jump-summary-toggle").addEventListener("click", function () { globalApi.jumpSummary = !globalApi.jumpSummary; this.classList.toggle("on", globalApi.jumpSummary); saveGlobalApi(); });
         document.getElementById("tlg-last-n").addEventListener("change", function () { globalApi.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5); saveGlobalApi(); });
+        document.getElementById("tlg-summary-max").addEventListener("change", function () { globalApi.summaryMaxCount = Math.max(10, parseInt(this.value, 10) || 100); saveGlobalApi(); });
         document.getElementById("tlg-summary-prompt").addEventListener("change", function () { globalApi.summaryPrompt = this.value; saveGlobalApi(); });
         document.getElementById("tlg-summary-run").addEventListener("click", function () { flashBtn(this); runSummary(false); });
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
