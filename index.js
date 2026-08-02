@@ -22,7 +22,7 @@
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
-        summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。每条尽量压缩至15字以内。",
+        summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。",
         autoMode: false, autoInterval: 10, lastNMessages: 5
     };
 
@@ -151,6 +151,7 @@
                 }
                 if (worldId) setLinkedWorldId(worldId);
             }
+                    updateInjection();
         }
         if (worldId && worlds[worldId]) {
             currentWorldId = worldId;
@@ -174,6 +175,7 @@
         worlds[currentWorldId].currentNodeId = state.currentNodeId;
         worlds[currentWorldId].updatedAt = Date.now();
         saveWorlds();
+		updateInjection();
     }
 
     // 确保当前聊天有世界（锚定时自动创建）
@@ -594,7 +596,31 @@
         if (!/\/v\d+/.test(url)) url += "/v1";
         return url + path;
     }
+    
+    // ── 总结自动注入 AI 上下文 ──
+    function updateInjection() {
+        var st = getST();
+        if (!st || typeof st.setExtensionPrompt !== "function") return;
+        if (!state.summaries || !state.summaries.length) {
+            st.setExtensionPrompt(EXT_NAME, "", 1, 4);
+            return;
+        }
+        // 取最近 3 条总结（可调）
+        var count = Math.min(3, state.summaries.length);
+        var recent = state.summaries.slice(-count);
+        var template = globalApi.vectorPrompt || "";
+        var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
 
+        var injectionText;
+        if (template && template.indexOf("{{context}}") !== -1) {
+            injectionText = template.replace("{{context}}", content);
+        } else {
+            injectionText = "以下为已记录的近期因果档案，作为背景参考：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
+        }
+        // position=1 (after system prompt), depth=4 (在第4条消息深度插入)
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 4);
+    }
+    
     function runSummary() {
         var apiUrl = (globalApi.apiUrl || "").trim();
         var apiKey = (globalApi.apiKey || "").trim();
@@ -1042,6 +1068,8 @@
                 });
             }
         } catch (e) {}
+                // 启动时加载当前世界并注入
+        try { loadCurrentWorld(); } catch (e) {}
         console.log("[TLG] 河岸凝视 v3.0 已加载");
     }
 
