@@ -22,15 +22,15 @@
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
-        summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。",
-        autoMode: false, autoInterval: 10, lastNMessages: 5
+        summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
+        summaryFilterMode: true,  
+		autoMode: false, autoInterval: 10, lastNMessages: 5
     };
 
     // ── 诸世界数据 ──
     // worlds = { [worldId]: { id, name, chatId, nodes, summaries, currentNodeId, createdAt, updatedAt } }
     var worlds = {};
     var currentWorldId = null;
-
     var canvas = null, ctx = null;
     var camX = 0, camY = 0, camZoom = 1;
     var isPanning = false, panStartX = 0, panStartY = 0;
@@ -302,12 +302,27 @@
         renderCanvas(); refreshArchive();
         return newId;
     }
-    function jumpToNode(nodeId) {
+    
+        function jumpToNode(nodeId) {
         var node = findNode(nodeId);
         if (!node) { toast("节点不存在。"); return; }
+        // ★ 跳转前：自动总结当前段（如果有 API 且有新消息）
+        var apiUrl = (globalApi.apiUrl || "").trim();
+        if (apiUrl && globalApi.autoMode) {
+            var st = getST();
+            if (st && st.chat) {
+                var visible = st.chat.filter(function (m) { return !m.is_hidden; });
+                if (visible.length > 0 && state.turnsSinceAnchor > 0) {
+                    // 静默总结，不阻塞跳转
+                    runSummary(true);
+                }
+            }
+        }
+        // 正常跳转逻辑
         if (node.statData != null) setMVUStatData(node.statData);
         applyVisibility(nodeId);
-        state.currentNodeId = nodeId; state.turnsSinceAnchor = 0;
+        state.currentNodeId = nodeId;
+        state.turnsSinceAnchor = 0; // ★ 重新计数
         saveCurrentWorld();
         toast("↩ 已跳转至: " + node.name);
         renderCanvas(); refreshArchive(); closeBriefPanel();
@@ -597,16 +612,33 @@
         return url + path;
     }
 	
-        // ── 基础注入（取最近3条）──
+    // ── 基础注入（取最近3条）──
     function updateInjection() {
         var st = getST();
         if (!st || typeof st.setExtensionPrompt !== "function") return;
         if (!state.summaries || !state.summaries.length) {
-            st.setExtensionPrompt(EXT_NAME, "", 1, 4);
+            st.setExtensionPrompt(EXT_NAME, "", 1, 6);
             return;
         }
-        var count = Math.min(3, state.summaries.length);
-        var recent = state.summaries.slice(-count);
+
+        var items;
+        if (globalApi.summaryFilterMode !== false) {
+            // 过滤模式：只取当前路径上的总结
+            var path = getPathToRoot(state.currentNodeId);
+            items = state.summaries.filter(function (s) {
+                return !s.nodeId || path.indexOf(s.nodeId) !== -1;
+            });
+        } else {
+            items = state.summaries.slice();
+        }
+
+        if (!items.length) {
+            st.setExtensionPrompt(EXT_NAME, "", 1, 6);
+            return;
+        }
+
+        var count = Math.min(3, items.length);
+        var recent = items.slice(-count);
         var template = globalApi.vectorPrompt || "";
         var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
         var injectionText;
@@ -615,8 +647,9 @@
         } else {
             injectionText = "以下为已记录的近期因果档案：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
         }
-        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 4);
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 6);
     }
+
 
     // ── 总结自动注入 AI 上下文 加向量检索──
     function updateInjectionWithVector() {
@@ -645,7 +678,16 @@
             if (!queryVec) { updateInjection(); return; }
 
             // 对所有总结做 embedding（简化：每次都算，生产环境应缓存）
-            var texts = state.summaries.map(function (s) { return s.text; });
+                    var pool;
+        if (globalApi.summaryFilterMode !== false) {
+            var path = getPathToRoot(state.currentNodeId);
+            pool = state.summaries.filter(function (s) {
+                return !s.nodeId || path.indexOf(s.nodeId) !== -1;
+            });
+        } else {
+            pool = state.summaries.slice();
+        }
+        var texts = pool.map(function (s) { return s.text; });
             return fetch(buildEndpoint(vecUrl, "/embeddings"), {
                 method: "POST",
                 headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
@@ -661,7 +703,7 @@
 
                 // 取 top 3
                 var top = scored.slice(0, 3);
-                var content = top.map(function (t) { return state.summaries[t.idx].text; }).join("\n\n---\n\n");
+                var content = top.map(function (t) { return pool[t.idx].text; }).join("\n\n---\n\n");
                 var template = globalApi.vectorPrompt || "";
                 var injectionText = template.indexOf("{{context}}") !== -1
                     ? template.replace("{{context}}", content)
@@ -671,31 +713,35 @@
         }).catch(function () { updateInjection(); }); // 失败降级
     }
 
-    function runSummary() {
+    function runSummary(auto) {
         var apiUrl = (globalApi.apiUrl || "").trim();
         var apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim();
         var summaryPrompt = (globalApi.summaryPrompt || "").trim();
-        if (!apiUrl) { toast("请先在引擎标签页设置 API 地址。"); return; }
+        if (!apiUrl) { if (!auto) toast("请先在引擎标签页设置 API 地址。"); return; }
         var st = getST();
-        if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
+        if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
         ensureWorldExists();
-        var recentChat = st.chat.slice(-20).map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
+                var countEl = document.getElementById("tlg-manual-count");
+        var count = auto ? (globalApi.autoInterval || 10) : (countEl ? Math.max(1, parseInt(countEl.value, 10) || 20) : 20);
+        var visible = st.chat.filter(function (m) { return !m.is_hidden; });
+        var recent = visible.slice(-count);
+        var recentChat = recent.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
         var prompt = (summaryPrompt || "").replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run");
         if (btn) btn.disabled = true;
-        toast("正在生成总结…");
+        if (!auto) toast("正在生成总结…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST",
             headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
-            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 512 })
+            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 4000 })
         }).then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
             if (!state.summaries) state.summaries = [];
-            state.summaries.push({ timestamp: Date.now(), text: text });
-            saveCurrentWorld(); refreshSummary(); toast("总结已生成。");
-        }).catch(function (e) { toast("总结失败: " + e.message); })
+            state.summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId });
+            saveCurrentWorld(); refreshSummary(); if (!auto) toast("总结已生成。");
+        }).catch(function (e) { if (!auto) toast("总结失败: " + e.message); })
         .then(function () { if (btn) btn.disabled = false; });
     }
 
@@ -891,7 +937,8 @@
             '<div class="tlg-section"><div class="tlg-section-title">总结提示词</div>' +
             '<label class="tlg-label">提示词模板（{{context}}）</label>' +
             '<textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea>' +
-            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即生成总结</button></div>' +
+            '<div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">手动总结最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="20" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条消息</label></div>' +
+		    '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即生成总结</button></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">总结历史</div><div style="font-size:12px;color:#6a6a78;margin-bottom:8px;">点击下方按钮查看完整历史，支持搜索和编辑。</div><div id="tlg-summary-list"></div></div></div></div>' +
             // worlds
             '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel">' +
@@ -1090,6 +1137,7 @@
         document.getElementById("tlg_enable_toggle").onclick = function () { var next = !this.classList.contains("on"); this.classList.toggle("on", next); setEnabled(next); toast(next ? "河岸凝视已启用" : "河岸凝视已关闭"); };
         document.getElementById("tlg_settings_open").onclick = function () { openPanel(); };
     }
+    
     function registerSlashCommand() {
         function wrap(value) { if (!isEnabled()) { toast("河岸凝视已关闭。"); return ""; } loadCurrentWorld(); showAnchorModal(String(value || "")); return ""; }
         var st = getST();
@@ -1101,8 +1149,30 @@
                 );
             } catch (e) {}
         }
-    }
-
+        // 切换总结过滤
+        function toggleFilter() {
+            if (!isEnabled()) { toast("河岸凝视已关闭。"); return ""; }
+            globalApi.summaryFilterMode = !globalApi.summaryFilterMode;
+            saveGlobalApi();
+            updateInjectionWithVector();
+            toast(globalApi.summaryFilterMode ? "已开启路径过滤（仅注入本时间线总结）" : "已关闭路径过滤（注入全部总结）");
+            return "";
+        }
+        if (st && st.registerSlashCommand) {
+            st.registerSlashCommand("tlg_filter", function (a, v) { return toggleFilter(); }, [], "切换河岸凝视总结过滤模式", true, true);
+        }
+        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
+            try {
+                window.SillyTavern.SlashCommandParser.addCommandObject(
+                    window.SillyTavern.SlashCommand.fromProps({
+                        name: "tlg_filter",
+                        callback: function (a, v) { return toggleFilter(); },
+                        helpString: "切换总结注入过滤：开=仅本时间线，关=全部时间线。"
+                    })
+                );
+            } catch (e) {}
+        }
+}
     function boot() {
         injectMenuButton();
         injectSettingsPanel();
