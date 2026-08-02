@@ -571,25 +571,20 @@
         var list = document.getElementById("tlg-summary-list");
         if (!list) return;
         if (!state.summaries || !state.summaries.length) {
-            list.innerHTML = '<div style="color:#6a6a78">暂无总结记录。</div>';
+            list.innerHTML = '<div style="color:#6a6a78;padding:12px">暂无总结记录。</div>';
             return;
         }
-        list.innerHTML = state.summaries.slice().reverse().map(function (s, i) {
-            var idx = state.summaries.length - 1 - i;
-            return (
-                '<div class="tlg-section">' +
-                '<div style="font-size:11px;color:#6a6a78;margin-bottom:6px">' +
-                new Date(s.timestamp).toLocaleString() + "</div>" +
-                '<div style="font-size:13px;white-space:pre-wrap">' + escHtml(s.text) + "</div>" +
-                '<button type="button" class="tlg-btn tlg-btn-danger" style="margin-top:8px;font-size:11px" data-idx="' + idx + '">删除</button></div>'
-            );
-        }).join("");
-        list.querySelectorAll("[data-idx]").forEach(function (btn) {
-            btn.onclick = function () {
-                state.summaries.splice(Number(btn.dataset.idx), 1);
-                saveToMetadata();
-                refreshSummary();
-            };
+        // 只显示最近一条预览 + 查看全部按钮
+        var latest = state.summaries[state.summaries.length - 1];
+        var preview = (latest.text || "").slice(0, 120);
+        if (latest.text && latest.text.length > 120) preview += "…";
+        list.innerHTML =
+            '<div style="background:#0e0e18;border:1px solid #1a1a28;border-radius:6px;padding:12px;margin-bottom:10px;">' +
+            '<div style="font-size:11px;color:#6a6a78;margin-bottom:6px">最新 · ' + new Date(latest.timestamp).toLocaleString() + '</div>' +
+            '<div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;">' + escHtml(preview) + '</div></div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看全部历史总结 (' + state.summaries.length + ' 条)</button>';
+        document.getElementById("tlg-summary-history-btn").addEventListener("click", function () {
+            openSummaryHistory();
         });
     }
 
@@ -607,12 +602,15 @@
         var apiUrl = (state.settings.apiUrl || "").trim();
         var apiKey = (state.settings.apiKey || "").trim();
         var model = (state.settings.model || "").trim();
+        var summaryPrompt = (state.settings.summaryPrompt || "").trim();
         if (!apiUrl) { toast("请先在引擎标签页设置 API 地址。"); return; }
         var st = getST();
-        var recentChat = ((st && st.chat) || []).slice(-20).map(function (m) {
-            return (m.name || m.role) + ": " + m.mes;
+        if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
+        // ★ 对最新消息总结（取最后20条，不受锚点影响）
+        var recentChat = st.chat.slice(-20).map(function (m) {
+            return (m.name || m.role || "???") + ": " + (m.mes || "");
         }).join("\n");
-        var prompt = (state.settings.summaryPrompt || "").replace("{{context}}", recentChat);
+        var prompt = (summaryPrompt || "").replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run");
         if (btn) btn.disabled = true;
         toast("正在生成总结…");
@@ -641,6 +639,146 @@
             toast("总结失败: " + e.message);
         }).then(function () {
             if (btn) btn.disabled = false;
+        });
+    }
+        // ── 总结历史全屏面板 ──
+    function openSummaryHistory() {
+        // 移除已有的
+        var old = document.getElementById("tlg-summary-fullscreen");
+        if (old) old.remove();
+
+        var container = document.createElement("div");
+        container.id = "tlg-summary-fullscreen";
+        container.style.cssText = "position:absolute;inset:0;z-index:10;background:#050508;display:flex;flex-direction:column;overflow:hidden;";
+
+        // 顶栏：搜索 + 返回
+        var header = document.createElement("div");
+        header.style.cssText = "display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1a1a28;flex-shrink:0;";
+        header.innerHTML =
+            '<button type="button" class="tlg-btn" id="tlg-sh-back" style="padding:6px 10px">← 返回</button>' +
+            '<input type="text" id="tlg-sh-search" placeholder="搜索关键词…" style="flex:1;padding:8px 12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:14px;outline:none;min-width:0;" />' +
+            '<span id="tlg-sh-count" style="font-size:12px;color:#6a6a78;flex-shrink:0;white-space:nowrap;">' + (state.summaries ? state.summaries.length : 0) + ' 条</span>';
+        container.appendChild(header);
+
+        // 列表区
+        var listWrap = document.createElement("div");
+        listWrap.id = "tlg-sh-list";
+        listWrap.style.cssText = "flex:1;overflow-y:auto;padding:12px;-webkit-overflow-scrolling:touch;";
+        container.appendChild(listWrap);
+
+        // 插入到 #tlg-body
+        var body = document.getElementById("tlg-body");
+        if (!body) return;
+        body.appendChild(container);
+
+        renderSummaryList("");
+
+        // 事件
+        document.getElementById("tlg-sh-back").addEventListener("click", function () {
+            container.remove();
+        });
+        document.getElementById("tlg-sh-search").addEventListener("input", function () {
+            renderSummaryList(this.value.trim().toLowerCase());
+        });
+    }
+
+    function renderSummaryList(keyword) {
+        var listWrap = document.getElementById("tlg-sh-list");
+        if (!listWrap) return;
+        var items = (state.summaries || []).slice().reverse(); // 从新到旧
+        if (keyword) {
+            items = items.filter(function (s) {
+                return (s.text || "").toLowerCase().indexOf(keyword) !== -1;
+            });
+        }
+        var countEl = document.getElementById("tlg-sh-count");
+        if (countEl) countEl.textContent = items.length + " 条";
+
+        if (!items.length) {
+            listWrap.innerHTML = '<div style="color:#6a6a78;padding:20px;text-align:center;">' + (keyword ? "未找到匹配结果。" : "暂无总结记录。") + '</div>';
+            return;
+        }
+
+        listWrap.innerHTML = items.map(function (s, displayIdx) {
+            // 计算在原数组中的真实索引
+            var realIdx = state.summaries.length - 1 - displayIdx;
+            if (keyword) {
+                // keyword 过滤后 displayIdx 不对应原数组，需要重新查找
+                realIdx = state.summaries.lastIndexOf(s);
+            }
+            return (
+                '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="background:#0a0a10;border:1px solid #1a1a28;border-radius:6px;padding:12px;margin-bottom:10px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                '<span style="font-size:11px;color:#6a6a78;">' + new Date(s.timestamp).toLocaleString() + '</span>' +
+                '<span style="font-size:11px;color:#6a6a78;">#' + (realIdx + 1) + '</span></div>' +
+                '<div class="tlg-sh-text" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.6;max-height:200px;overflow-y:auto;">' + escHtml(s.text) + '</div>' +
+                '<div style="margin-top:10px;display:flex;gap:8px;">' +
+                '<button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;">✏️ 编辑</button>' +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;">✕ 删除</button>' +
+                '</div></div>'
+            );
+        }).join("");
+
+        // 绑定编辑按钮
+        listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var idx = Number(btn.dataset.idx);
+                openSummaryEditor(idx);
+            });
+        });
+        // 绑定删除按钮
+        listWrap.querySelectorAll(".tlg-sh-del").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var idx = Number(btn.dataset.idx);
+                if (!confirm("确定删除这条总结？")) return;
+                state.summaries.splice(idx, 1);
+                saveToMetadata();
+                var keyword = (document.getElementById("tlg-sh-search") || {}).value || "";
+                renderSummaryList(keyword.trim().toLowerCase());
+                refreshSummary();
+                toast("已删除。");
+            });
+        });
+    }
+
+    function openSummaryEditor(idx) {
+        var s = state.summaries[idx];
+        if (!s) return;
+
+        // 移除已有编辑器
+        var oldEditor = document.getElementById("tlg-sh-editor");
+        if (oldEditor) oldEditor.remove();
+
+        var editor = document.createElement("div");
+        editor.id = "tlg-sh-editor";
+        editor.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;";
+        editor.innerHTML =
+            '<div style="background:#0a0a10;border:1px solid #2a2a3a;border-radius:10px;padding:18px;width:100%;max-width:500px;max-height:80vh;display:flex;flex-direction:column;box-sizing:border-box;">' +
+            '<div style="font-size:14px;font-weight:600;color:#e8e8f0;margin-bottom:4px;">编辑总结 #' + (idx + 1) + '</div>' +
+            '<div style="font-size:11px;color:#6a6a78;margin-bottom:12px;">' + new Date(s.timestamp).toLocaleString() + '</div>' +
+            '<textarea id="tlg-sh-editor-text" style="flex:1;min-height:200px;padding:12px;background:#0e0e18;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:14px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;">' + escHtml(s.text) + '</textarea>' +
+            '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">' +
+            '<button type="button" class="tlg-btn" id="tlg-sh-editor-cancel">取消</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-sh-editor-save">保存修改</button>' +
+            '</div></div>';
+        document.body.appendChild(editor);
+
+        editor.addEventListener("click", function (e) {
+            if (e.target === editor) editor.remove();
+        });
+        document.getElementById("tlg-sh-editor-cancel").addEventListener("click", function () {
+            editor.remove();
+        });
+        document.getElementById("tlg-sh-editor-save").addEventListener("click", function () {
+            flashBtn(this);
+            var newText = document.getElementById("tlg-sh-editor-text").value;
+            state.summaries[idx].text = newText;
+            saveToMetadata();
+            var keyword = (document.getElementById("tlg-sh-search") || {}).value || "";
+            renderSummaryList(keyword.trim().toLowerCase());
+            refreshSummary();
+            editor.remove();
+            toast("总结已更新。");
         });
     }
 
@@ -769,7 +907,7 @@ function populateVectorModelSelect() {
             '<label class="tlg-label">提示词模板（{{context}}）</label>' +
             '<textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + "</textarea>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px">▶ 立即生成总结</button></div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">总结历史</div><div id="tlg-summary-list"></div></div></div></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">总结历史</div><div style="font-size:12px;color:#6a6a78;margin-bottom:8px;">点击下方按钮查看完整历史，支持搜索和编辑。</div><div id="tlg-summary-list"></div></div></div></div>' +1亅
             // engine
             '<div class="tlg-view" data-view="engine">' +
             '<div class="tlg-scroll-panel">' +
