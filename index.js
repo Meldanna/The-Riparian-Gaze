@@ -271,6 +271,17 @@
         state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("⚓ 已锚定: " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
+    
+    function createAnchorAtFloor(name, brief, floorIdx) {
+        var st = getST(); if (!st) return; ensureWorldExists();
+        var msgIdx = Math.max(0, Math.min(floorIdx, (st.chat ? st.chat.length - 1 : 0)));
+        var parentId = state.currentNodeId; var newId = generateId();
+        var newNode = { id: newId, name: name || ("节点@#" + msgIdx), brief: brief || "", parentId: parentId, msgIdx: msgIdx, statData: getMVUStatData(), timestamp: Date.now(), children: [] };
+        var parent = findNode(parentId);
+        if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
+        state.nodes.push(newNode); state.selectedNodeId = newId;
+        saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
+    }
 
     // ══════════════════════════════════════
     // ② 跳转 —— 修复版
@@ -309,11 +320,23 @@
         var existing = document.getElementById("tlg-anchor-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-anchor-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚓ 锚定因果刻度</div><div style="margin-bottom:12px"><label class="tlg-label">节点名称</label><input class="tlg-input" id="tlg-anc-name" placeholder="例：抉择之前…" value="' + escHtml(prefillName || "") + '" /></div><div><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">确认锚定</button></div></div>';
+                var st = getST(); var maxFloor = st && st.chat ? st.chat.length - 1 : 0;
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚓ 锚定因果刻度</div><div style="margin-bottom:12px"><label class="tlg-label">节点名称</label><input class="tlg-input" id="tlg-anc-name" placeholder="例：抉择之前…" value="' + escHtml(prefillName || "") + '" /></div><div style="margin-bottom:12px"><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea></div><div style="margin-bottom:12px"><label class="tlg-label">锚定楼层（留空=当前最新 #' + maxFloor + '）</label><input class="tlg-input" id="tlg-anc-floor" type="number" min="0" max="' + maxFloor + '" placeholder="' + maxFloor + '" /></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">确认锚定</button></div></div>';
         document.body.appendChild(backdrop);
         var nameInput = backdrop.querySelector("#tlg-anc-name");
         backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
-        backdrop.querySelector("#tlg-anc-ok").onclick = function () { createAnchor(nameInput.value.trim() || ("节点 " + state.nodes.length), backdrop.querySelector("#tlg-anc-brief").value.trim()); backdrop.remove(); };
+                backdrop.querySelector("#tlg-anc-ok").onclick = function () {
+            var ancName = nameInput.value.trim() || ("节点 " + state.nodes.length);
+            var ancBrief = backdrop.querySelector("#tlg-anc-brief").value.trim();
+            var floorInput = backdrop.querySelector("#tlg-anc-floor");
+            var floorVal = floorInput ? floorInput.value.trim() : "";
+            if (floorVal !== "") {
+                createAnchorAtFloor(ancName, ancBrief, parseInt(floorVal, 10) || 0);
+            } else {
+                createAnchor(ancName, ancBrief);
+            }
+            backdrop.remove();
+        };
         backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
         setTimeout(function () { nameInput.focus(); }, 80);
     }
