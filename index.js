@@ -135,6 +135,12 @@
         if (worldId && worlds[worldId]) {
             currentWorldId = worldId; var w = worlds[worldId];
             state.nodes = w.nodes || []; state.summaries = w.summaries || [];
+                        // 防护：如果节点列表为空或无根节点，自动重建
+        if (!state.nodes.length || !state.nodes.find(function(n) { return !n.parentId; })) {
+                var rootId = generateId();
+                state.nodes.unshift({ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] });
+                if (!state.nodes.find(function(n) { return n.id === w.currentNodeId; })) w.currentNodeId = rootId;
+            }
             state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
             state.selectedNodeId = null;
             state.turnsSinceAnchor = w.turnsSinceAnchor || 0;
@@ -500,12 +506,19 @@
             btn.onclick = function () { showGraftModal(btn.dataset.nid); };
         });
     }
-    function deleteNode(nodeId) {
-        var node = findNode(nodeId); if (!node) return; var parent = findNode(node.parentId);
+        function deleteNode(nodeId) {
+        var node = findNode(nodeId); if (!node) return;
+        // 禁止删除根节点
+        if (!node.parentId) { toast("无法删除根节点（起源点）。"); return; }
+        var parent = findNode(node.parentId);
         if (parent) parent.children = parent.children.filter(function (id) { return id !== nodeId; });
         function rm(id) { var n = findNode(id); if (!n) return; n.children.slice().forEach(rm); state.nodes = state.nodes.filter(function (x) { return x.id !== id; }); }
-        rm(nodeId); saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
+        rm(nodeId);
+        // 如果删掉的是当前节点，回退到父节点
+        if (state.currentNodeId === nodeId) state.currentNodeId = node.parentId;
+        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
     }
+
 
     // 嫁接：把 nodeId 从当前父节点摘下，挂到 newParentId 下
     function graftNode(nodeId, newParentId) {
@@ -537,7 +550,7 @@
         var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
         var opts = candidates.map(function (n) {
-            return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + (n.id === node.parentId ? " (当前父节点)" : "") + '</option>';
+            return '<option value="' + escHtml(n.id) + '">' + esctml(n.name) + (n.id === node.parentId ? " (当前父节点)" : "") + '</option>';
         }).join("");
         backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⇢ 嫁接节点</div>' +
             '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其全部子树，移动到选定的新父节点下。</div>' +
@@ -566,7 +579,8 @@
         }
         var latest = state.summaries[state.summaries.length - 1];
         var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
-        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
+        var latestFloor = (latest.floorFrom >= 0 && latest.floorTo >= 0) ? ' · #' + latest.floorFrom + '~#' + latest.floorTo : '';
+        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
         document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { openSummaryHistory(); });
     }
 
@@ -595,9 +609,10 @@
         if (!items.length) {
             listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return;
         }
-        listWrap.innerHTML = items.map(function (s, displayIdx) {
+                listWrap.innerHTML = items.map(function (s, displayIdx) {
             var realIdx = state.summaries.indexOf(s);
-            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
+            var floorInfo = (s.floorFrom >= 0 && s.floorTo >= 0) ? ' · <span style="color:#9999bb;">#' + s.floorFrom + '~#' + s.floorTo + '</span>' : '';
+            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + floorInfo + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
         }).join("");
         listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
             btn.addEventListener("click", function () {
