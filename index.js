@@ -104,7 +104,21 @@
         var st = getST(); if (!st) return;
         if (!st.chat_metadata) st.chat_metadata = {};
         st.chat_metadata.tlg_worldId = worldId;
-        if (typeof st.saveMetadata === "function") st.saveMetadata();
+        // 强制保存：优先 saveMetadata，再 saveMetadataDebounced
+        if (typeof st.saveMetadata === "function") {
+            st.saveMetadata();
+        } else if (typeof window.saveMetadataDebounced === "function") {
+            window.saveMetadataDebounced();
+        }
+        // 延迟验证是否写入成功
+        setTimeout(function () {
+            var verify = getST();
+            if (verify && verify.chat_metadata && verify.chat_metadata.tlg_worldId !== worldId) {
+                // 写入丢失，重试一次
+                if (verify.chat_metadata) verify.chat_metadata.tlg_worldId = worldId;
+                if (typeof verify.saveMetadata === "function") verify.saveMetadata();
+            }
+        }, 800);
     }
     function loadCurrentWorld() {
         loadGlobalApi(); loadWorlds();
@@ -122,6 +136,7 @@
             state.nodes = w.nodes || []; state.summaries = w.summaries || [];
             state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
             state.selectedNodeId = null;
+            state.turnsSinceAnchor = w.turnsSinceAnchor || 0;
         } else {
             currentWorldId = null; resetState();
         }
@@ -132,6 +147,7 @@
         worlds[currentWorldId].nodes = JSON.parse(JSON.stringify(state.nodes));
         worlds[currentWorldId].summaries = JSON.parse(JSON.stringify(state.summaries));
         worlds[currentWorldId].currentNodeId = state.currentNodeId;
+        worlds[currentWorldId].turnsSinceAnchor = state.turnsSinceAnchor;
         worlds[currentWorldId].updatedAt = Date.now();
         saveWorlds(); updateInjectionWithVector();
     }
@@ -181,21 +197,17 @@
     }
 
     // ══════════════════════════════════════
-    // ① MVU 变量读写 —— 修复版
-    //   优先用酒馆暴露的全局函数，再 fallback 到 chat_metadata 各路径
+    // MVU 变量读写 —— 使用 Mvu 框架接口
+    // Mvu.getMvuVariable / Mvu.setMvuVariable 是该框架暴露的标准接口
     // ══════════════════════════════════════
     function getMVUStatData() {
         try {
-            // 最可靠：酒馆全局函数
-            if (typeof window.getVariable === "function") {
-                var v = window.getVariable("stat_data");
+            // 优先：Mvu 框架标准接口
+            if (typeof window.Mvu !== "undefined" && typeof window.Mvu.getMvuVariable === "function") {
+                var v = window.Mvu.getMvuVariable("stat_data");
                 if (v != null) return JSON.parse(JSON.stringify(v));
             }
-            if (typeof window.getAllVariables === "function") {
-                var all = window.getAllVariables();
-                if (all && all.stat_data != null) return JSON.parse(JSON.stringify(all.stat_data));
-            }
-            // fallback：直接读 chat_metadata 的多个可能路径
+            // fallback：chat_metadata 各路径
             var st = getST(); if (!st || !st.chat_metadata) return null;
             var cm = st.chat_metadata;
             if (cm.variables && cm.variables.stat_data != null) return JSON.parse(JSON.stringify(cm.variables.stat_data));
@@ -207,14 +219,14 @@
     function setMVUStatData(data) {
         if (data == null) return;
         try {
-            // 优先用酒馆全局函数写
-            if (typeof window.setVariable === "function") {
-                window.setVariable("stat_data", data);
-                return; // 酒馆自己会 saveMetadata
+            // 优先：Mvu 框架标准接口
+            if (typeof window.Mvu !== "undefined" && typeof window.Mvu.setMvuVariable === "function") {
+                window.Mvu.setMvuVariable("stat_data", data);
+                return;
             }
+            // fallback：写回 chat_metadata
             var st = getST(); if (!st || !st.chat_metadata) return;
             var cm = st.chat_metadata;
-            // 写回到读取时发现的同一个位置，保持一致
             if (cm.variables && typeof cm.variables === "object") {
                 cm.variables.stat_data = JSON.parse(JSON.stringify(data));
             } else if (cm.script_variables && typeof cm.script_variables === "object") {
@@ -379,6 +391,13 @@
                 var grd3 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR3);
                 grd3.addColorStop(0, "rgba(255,255,255,0.1)"); grd3.addColorStop(1, "rgba(255,255,255,0)");
                 ctx.fillStyle = grd3; ctx.fill();
+            } else {
+                // 非路径节点：极小极暗的光晕，表示存在感但不突出
+                var glowR4 = NODE_R + 3;
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR4, 0, Math.PI * 2);
+                var grd4 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.8, pos.x, pos.y, glowR4);
+                grd4.addColorStop(0, "rgba(255,255,255,0.04)"); grd4.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = grd4; ctx.fill();
             }
 
             ctx.beginPath(); ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
@@ -669,40 +688,53 @@
     //   runSummaryWithMessages(messages) —— 传入已收集好的消息数组，用于跳转前自动总结
     //   runSummary(auto)                 —— 手动/自动触发，取当前可见消息
     // ══════════════════════════════════════
-    function _doSummaryRequest(messagesArray, auto) {
+    function _doSummaryRequest(messagesArray, auto, sourceLabel) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
-        if (!apiUrl) { if (!auto) toast("请先在引擎标签页设置 API 地址。"); return; }
+        if (!apiUrl) { toast("切片失败：未设置 API 地址。"); return; }
         if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); return; }
+        // 锁住当前世界ID，防止切换聊天后写入错位
+        var lockedWorldId = currentWorldId;
         var recentChat = messagesArray.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
         var prompt = summaryPrompt.replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run"); if (btn) btn.disabled = true;
-        if (!auto) toast("正在执行状态切片…");
+        var label = sourceLabel || (auto ? "自动" : "手动");
+        toast("⏳ " + label + "切片中…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
             body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 2048 })
         }).then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            if (!state.summaries) state.summaries = [];
-            state.summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId });
-            // 总结池上限保护：超出时删除最旧的
-            var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
-            if (state.summaries.length > maxCount) {
-                var trimmed = state.summaries.length - maxCount;
-                state.summaries.splice(0, trimmed);
-                if (!auto) toast("档案记录完成（已自动清理最旧 " + trimmed + " 条）。");
-            } else {
-                if (!auto) toast("档案记录完成。");
+            // 使用锁住的worldId写入，不受切换聊天影响
+            if (lockedWorldId && worlds[lockedWorldId]) {
+                if (!worlds[lockedWorldId].summaries) worlds[lockedWorldId].summaries = [];
+                worlds[lockedWorldId].summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId });
+                // 总结池上限保护
+                var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
+                var trimmed = 0;
+                if (worlds[lockedWorldId].summaries.length > maxCount) {
+                    trimmed = worlds[lockedWorldId].summaries.length - maxCount;
+                    worlds[lockedWorldId].summaries.splice(0, trimmed);
+                }
+                // 同步到 state（仅当世界没有切换时）
+                if (lockedWorldId === currentWorldId) {
+                    state.summaries = worlds[lockedWorldId].summaries;
+                    refreshSummary();
+                }
+                saveWorlds(); updateInjectionWithVector();
+                if (trimmed > 0) {
+                    toast("✓ " + label + "切片完成（已清理最旧 " + trimmed + " 条）。");
+                } else {
+                    toast("✓ " + label + "切片完成。");
+                }
             }
-            saveCurrentWorld(); refreshSummary(); updateInjectionWithVector();
-        }).catch(function (e) { if (!auto) toast("提取失败: " + e.message); })
+        }).catch(function (e) { toast("✗ " + label + "切片失败：" + e.message); })
         .then(function () { if (btn) btn.disabled = false; });
     }
 
     function runSummaryWithMessages(messagesArray) {
-        // 跳转前调用，传入跳转前收集的消息，异步执行，auto=true 静默运行
-        _doSummaryRequest(messagesArray, true);
+        _doSummaryRequest(messagesArray, true, "跳转前");
     }
 
     function runSummary(auto) {
@@ -712,7 +744,7 @@
         var count = auto ? (globalApi.autoInterval || 10) : (countEl ? Math.max(1, parseInt(countEl.value, 10) || 20) : 20);
         var visible = st.chat.filter(function (m) { return !m.is_hidden; });
         var recent = visible.slice(-count);
-        _doSummaryRequest(recent, auto);
+        _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
     }
 
     function fetchModelList() {
