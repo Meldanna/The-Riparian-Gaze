@@ -246,7 +246,7 @@
         } catch (e) {}
     }
 
-        function applyVisibility(targetNodeId) {
+            function applyVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
         var pathIds = getPathToRoot(targetNodeId); var pathNodes = pathIds.map(findNode).filter(Boolean);
         var visible = {}, i, m, node, next, start, end;
@@ -257,7 +257,15 @@
         var target = findNode(targetNodeId); var lastN = Math.max(0, globalApi.lastNMessages || 5);
         var endIdx = target ? target.msgIdx : st.chat.length - 1;
         for (m = Math.max(0, endIdx - lastN + 1); m <= endIdx; m++) visible[m] = true;
-        for (i = 0; i < st.chat.length; i++) { if (visible[i]) delete st.chat[i].is_hidden; else st.chat[i].is_hidden = true; }
+        // 用 is_system 隐藏（酒馆原生机制），加 _tlg_hidden 标记以便恢复
+        for (i = 0; i < st.chat.length; i++) {
+            if (visible[i]) {
+                // 恢复：只恢复我们标记过的
+                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+            } else {
+                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+            }
+        }
         if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
     }
 
