@@ -5,7 +5,7 @@
     var EXT_NAME = "RiparianGaze";
     var METADATA_KEY = "tlg_data";
 
-        var state = {
+    var state = {
         nodes: [],
         currentNodeId: null,
         selectedNodeId: null,
@@ -15,7 +15,7 @@
         lastAutoSummaryRange: null  // { floorFrom, floorTo, summaryIdx }
     };
 
-        var globalApi = {
+    var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
@@ -106,17 +106,15 @@
         var st = getST(); if (!st) return;
         if (!st.chat_metadata) st.chat_metadata = {};
         st.chat_metadata.tlg_worldId = worldId;
-        // 强制保存：优先 saveMetadata，再 saveMetadataDebounced
         if (typeof st.saveMetadata === "function") {
             st.saveMetadata();
         } else if (typeof window.saveMetadataDebounced === "function") {
             window.saveMetadataDebounced();
         }
-        // 延迟验证是否写入成功
+        // 延迟验证，确保写入
         setTimeout(function () {
             var verify = getST();
             if (verify && verify.chat_metadata && verify.chat_metadata.tlg_worldId !== worldId) {
-                // 写入丢失，重试一次
                 if (verify.chat_metadata) verify.chat_metadata.tlg_worldId = worldId;
                 if (typeof verify.saveMetadata === "function") verify.saveMetadata();
             }
@@ -136,8 +134,8 @@
         if (worldId && worlds[worldId]) {
             currentWorldId = worldId; var w = worlds[worldId];
             state.nodes = w.nodes || []; state.summaries = w.summaries || [];
-                        // 防护：如果节点列表为空或无根节点，自动重建
-        if (!state.nodes.length || !state.nodes.find(function(n) { return !n.parentId; })) {
+            // 防护：如果节点列表为空或无根节点，自动重建
+            if (!state.nodes.length || !state.nodes.find(function(n) { return !n.parentId; })) {
                 var rootId = generateId();
                 state.nodes.unshift({ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] });
                 if (!state.nodes.find(function(n) { return n.id === w.currentNodeId; })) w.currentNodeId = rootId;
@@ -205,10 +203,9 @@
     }
 
     // ══════════════════════════════════════
-    // MVU 变量读写 —— 使用 Mvu 框架接口
-    // Mvu.getMvuVariable / Mvu.setMvuVariable 是该框架暴露的标准接口
+    // MVU 变量读写
     // ══════════════════════════════════════
-        function getMVUStatData() {
+    function getMVUStatData() {
         try {
             // 最优先：渲染脚本桥接到主窗口的快照
             if (window.__tlg_mvu_snapshot && Object.keys(window.__tlg_mvu_snapshot).length > 0) {
@@ -247,7 +244,7 @@
         } catch (e) {}
     }
 
-            function applyVisibility(targetNodeId) {
+    function applyVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
         var pathIds = getPathToRoot(targetNodeId); var pathNodes = pathIds.map(findNode).filter(Boolean);
         var visible = {}, i, m, node, next, start, end;
@@ -267,7 +264,24 @@
                 if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
             }
         }
-                if (typeof st.saveChat === "function") st.saveChat();
+        if (typeof st.saveChat === "function") st.saveChat();
+    }
+
+    function applyRecentVisibility() {
+        var st = getST(); if (!st || !st.chat || !st.chat.length) return;
+        var lastN = Math.max(1, globalApi.lastNMessages || 5);
+        var total = st.chat.length;
+        var changed = false;
+        for (var i = 0; i < total; i++) {
+            if (i >= total - lastN) {
+                // 可见：恢复我们标记过的
+                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; changed = true; }
+            } else {
+                // 隐藏
+                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; changed = true; }
+            }
+        }
+        if (changed && typeof st.saveChat === "function") st.saveChat();
     }
 
     function createAnchor(name, brief) {
@@ -280,7 +294,7 @@
         state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("⚓ 已锚定: " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
-    
+
     function createAnchorAtFloor(name, brief, floorIdx) {
         var st = getST(); if (!st) return; ensureWorldExists();
         var msgIdx = Math.max(0, Math.min(floorIdx, (st.chat ? st.chat.length - 1 : 0)));
@@ -288,19 +302,17 @@
         var newNode = { id: newId, name: name || ("节点@#" + msgIdx), brief: brief || "", parentId: parentId, msgIdx: msgIdx, statData: getMVUStatData(), timestamp: Date.now(), children: [] };
         var parent = findNode(parentId);
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
-        state.nodes.push(newNode); state.selectedNodeId = newId;
+        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId;
         saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
 
     // ══════════════════════════════════════
-    // ② 跳转 —— 修复版
-    //   先收集当前可见消息用于总结，再执行跳转，时序正确
+    // ② 跳转
     // ══════════════════════════════════════
     function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
         var st = getST();
 
-        // 收集跳转前的对话用于自动总结（在 applyVisibility 改变可见性之前）
         var preJumpMessages = null;
         var apiUrl = (globalApi.apiUrl || "").trim();
         if (apiUrl && globalApi.jumpSummary && st && st.chat && state.turnsSinceAnchor > 0) {
@@ -310,15 +322,12 @@
             }
         }
 
-        // 恢复 MVU 快照
         if (node.statData != null) setMVUStatData(node.statData);
 
-        // 调整消息可见性
         applyVisibility(nodeId);
         state.currentNodeId = nodeId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("↩ 已跳转至: " + node.name); renderCanvas(); refreshArchive(); closeBriefPanel();
 
-        // 用跳转前收集的消息做总结（异步，不阻塞跳转）
         if (preJumpMessages && preJumpMessages.length > 0) {
             runSummaryWithMessages(preJumpMessages);
         }
@@ -329,12 +338,12 @@
         var existing = document.getElementById("tlg-anchor-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-anchor-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
-                var st = getST(); var maxFloor = st && st.chat ? st.chat.length - 1 : 0;
+        var st = getST(); var maxFloor = st && st.chat ? st.chat.length - 1 : 0;
         backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚓ 锚定因果刻度</div><div style="margin-bottom:12px"><label class="tlg-label">节点名称</label><input class="tlg-input" id="tlg-anc-name" placeholder="例：抉择之前…" value="' + escHtml(prefillName || "") + '" /></div><div style="margin-bottom:12px"><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea></div><div style="margin-bottom:12px"><label class="tlg-label">锚定楼层（留空=当前最新 #' + maxFloor + '）</label><input class="tlg-input" id="tlg-anc-floor" type="number" min="0" max="' + maxFloor + '" placeholder="' + maxFloor + '" /></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">确认锚定</button></div></div>';
         document.body.appendChild(backdrop);
         var nameInput = backdrop.querySelector("#tlg-anc-name");
         backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
-                backdrop.querySelector("#tlg-anc-ok").onclick = function () {
+        backdrop.querySelector("#tlg-anc-ok").onclick = function () {
             var ancName = nameInput.value.trim() || ("节点 " + state.nodes.length);
             var ancBrief = backdrop.querySelector("#tlg-anc-brief").value.trim();
             var floorInput = backdrop.querySelector("#tlg-anc-floor");
@@ -428,117 +437,52 @@
                 var grd3 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.6, pos.x, pos.y, glowR3);
                 grd3.addColorStop(0, "rgba(255,255,255,0.1)"); grd3.addColorStop(1, "rgba(255,255,255,0)");
                 ctx.fillStyle = grd3; ctx.fill();
-            } else {
-                // 非路径节点：极小极暗的光晕，表示存在感但不突出
-                var glowR4 = NODE_R + 3;
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR4, 0, Math.PI * 2);
-                var grd4 = ctx.createRadialGradient(pos.x, pos.y, NODE_R * 0.8, pos.x, pos.y, glowR4);
-                grd4.addColorStop(0, "rgba(255,255,255,0.04)"); grd4.addColorStop(1, "rgba(255,255,255,0)");
-                ctx.fillStyle = grd4; ctx.fill();
             }
 
             ctx.beginPath(); ctx.arc(pos.x, pos.y, NODE_R, 0, Math.PI * 2);
-            ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.shadowBlur = 0;
+            if (isCurrent) { ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3; }
+            else if (isSelected) { ctx.fillStyle = "#2a2a3a"; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5; }
+            else if (onPath) { ctx.fillStyle = "#1a1a2a"; ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 2; }
+            else { ctx.fillStyle = "#0a0a12"; ctx.strokeStyle = "rgba(140,140,160,0.5)"; ctx.lineWidth = 1.5; }
+            ctx.fill(); ctx.stroke();
 
-            ctx.fillStyle = isCurrent ? "#ffffff" : onPath ? "rgba(230,230,240,0.9)" : "rgba(160,160,175,0.7)";
-            ctx.font = isCurrent ? "bold 11px sans-serif" : "11px sans-serif";
-            ctx.textAlign = "center"; ctx.textBaseline = "top";
-            label = node.name.length > 12 ? node.name.slice(0, 11) + "…" : node.name;
-            ctx.fillText(label, pos.x, pos.y + NODE_R + 7);
+            ctx.font = "bold 11px -apple-system, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillStyle = isCurrent ? "#000000" : "#ffffff";
+            label = (node.name || "").slice(0, 4); ctx.fillText(label, pos.x, pos.y);
+            ctx.font = "10px -apple-system, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.5)";
+            ctx.fillText("#" + (node.msgIdx || 0), pos.x, pos.y + NODE_R + 14);
         }
 
         if (ripple) {
-            var elapsed = (Date.now() - ripple.startTime) / 1000, maxDur = 0.6;
+            var elapsed = Date.now() - ripple.startTime, maxDur = 600;
             if (elapsed < maxDur) {
-                var progress = elapsed / maxDur, rRadius = progress * 60, rAlpha = 1 - progress;
-                ctx.beginPath(); ctx.arc(ripple.x, ripple.y, rRadius, 0, Math.PI * 2);
-                ctx.strokeStyle = "rgba(255,255,255," + (rAlpha * 0.6) + ")";
-                ctx.lineWidth = 2 * (1 - progress); ctx.stroke();
+                var prog = elapsed / maxDur, r = 40 + prog * 80, alpha = 0.6 * (1 - prog);
+                ctx.beginPath(); ctx.arc(ripple.x, ripple.y, r, 0, Math.PI * 2);
+                ctx.strokeStyle = "rgba(255,255,255," + alpha + ")"; ctx.lineWidth = 2; ctx.stroke();
             } else { ripple = null; }
         }
         ctx.restore();
+        requestAnimationFrame(renderCanvas);
     }
 
-    function centerOnCurrentNode() {
-        var positions = layoutTree();
-        var pos = positions[state.currentNodeId];
-        if (!pos) return;
-        var rect = canvas && canvas.getBoundingClientRect();
-        if (!rect) return;
-        // 把当前节点的世界坐标移到画布中心
-        camX = -pos.x * camZoom;
-        camY = -pos.y * camZoom;
-    }
-
-    function canvasHitTest(clientX, clientY) {
-        if (!canvas) return null;
+    function canvasHitTest(mx, my) {
         var rect = canvas.getBoundingClientRect();
-        var wx = (clientX - rect.left - rect.width / 2 - camX) / camZoom;
-        var wy = (clientY - rect.top - rect.height / 2 - camY) / camZoom;
-        var positions = layoutTree(), NODE_R = 22, ids = Object.keys(positions);
-        for (var i = 0; i < ids.length; i++) {
-            var pos = positions[ids[i]], dx = wx - pos.x, dy = wy - pos.y;
-            if (dx * dx + dy * dy <= (NODE_R + 4) * (NODE_R + 4)) return ids[i];
+        var worldX = (mx - rect.left - rect.width / 2 - camX) / camZoom;
+        var worldY = (my - rect.top - rect.height / 2 - camY) / camZoom;
+        var positions = layoutTree(), NODE_R = 22;
+        for (var i = 0; i < state.nodes.length; i++) {
+            var pos = positions[state.nodes[i].id]; if (!pos) continue;
+            if (Math.hypot(worldX - pos.x, worldY - pos.y) < NODE_R + 6) return state.nodes[i].id;
         }
         return null;
     }
-
-    function openBriefPanel(nodeId) {
-        var node = findNode(nodeId); if (!node) return; state.selectedNodeId = nodeId;
-        var panel = document.getElementById("tlg-brief-panel"); if (!panel) return;
-        panel.classList.add("open"); panel.querySelector(".tlg-brief-header span").textContent = node.name;
-        var body = panel.querySelector(".tlg-brief-body");
-        body.innerHTML = '<div style="margin-bottom:8px;font-size:11px;color:#7a7a8a">' + new Date(node.timestamp).toLocaleString() + "</div>" +
-            '<div style="margin-bottom:8px;font-size:11px;color:#7a7a8a">消息索引: ' + node.msgIdx + " | " + (node.statData ? "MVU快照 ✓" : "无MVU快照") + "</div>" +
-            '<div style="white-space:pre-wrap;word-break:break-word">' + (node.brief ? escHtml(node.brief) : "<em style='color:#7a7a8a'>暂无描述。</em>") + "</div>" +
-            '<div style="margin-top:12px"><label class="tlg-label">编辑描述</label><textarea class="tlg-textarea" id="tlg-brief-edit" style="min-height:100px">' + escHtml(node.brief || "") + "</textarea>" +
-            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%!important">保存描述</button></div>';
-        body.querySelector("#tlg-brief-save").onclick = function () {
-            flashBtn(this); node.brief = body.querySelector("#tlg-brief-edit").value; saveCurrentWorld(); toast("描述已保存。"); refreshArchive();
-        };
-        panel.querySelector(".tlg-brief-footer").innerHTML =
-            '<button type="button" class="tlg-btn" id="tlg-brief-rename" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-bottom:8px;width:100%!important;">✎ 重命名节点</button>' +
-            '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此因果</button>';
-        panel.querySelector("#tlg-brief-jump").onclick = function () { jumpToNode(nodeId); };
-        panel.querySelector("#tlg-brief-rename").onclick = function () {
-            var newName = prompt("新节点名称：", node.name);
-            if (newName === null) return;
-            newName = newName.trim();
-            if (!newName) return;
-            node.name = newName;
-            panel.querySelector(".tlg-brief-header span").textContent = newName;
-            saveCurrentWorld(); refreshArchive(); renderCanvas(); toast("节点已重命名。");
-        };
+    function centerOnNode(nodeId) {
+        var positions = layoutTree(); var pos = positions[nodeId]; if (!pos) return;
+        camX = -pos.x * camZoom; camY = -pos.y * camZoom;
     }
-    function closeBriefPanel() { var panel = document.getElementById("tlg-brief-panel"); if (panel) panel.classList.remove("open"); state.selectedNodeId = null; }
 
-    function refreshArchive() {
-        var container = document.getElementById("tlg-archive-list"); if (!container) return;
-        if (!state.nodes.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">河流静默，因果尚未铭刻。</div>'; return; }
-        var sorted = state.nodes.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
-        container.innerHTML = sorted.map(function (node) {
-            var isCurrent = node.id === state.currentNodeId;
-            return '<div class="tlg-archive-card ' + (isCurrent ? "current" : "") + '"><div class="tlg-archive-title">' + escHtml(node.name) + (isCurrent ? " <span style='color:#7a7a8a;font-size:11px'>(当前)</span>" : "") + "</div>" +
-                '<div class="tlg-archive-meta">' + new Date(node.timestamp).toLocaleString() + " · 消息 " + node.msgIdx + '</div><div class="tlg-archive-brief">' + escHtml(node.brief || "") + "</div>" +
-                '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="tlg-btn tlg-archive-view" data-nid="' + node.id + '">追踪节点</button><button type="button" class="tlg-btn tlg-btn-primary tlg-archive-jump" data-nid="' + node.id + '">↩ 跳转至此</button>' +
-                (!isCurrent ? '<button type="button" class="tlg-btn tlg-archive-graft" data-nid="' + node.id + '" title="把此节点嫁接到另一个父节点下">⇢ 嫁接</button>' : '') +
-                '<button type="button" class="tlg-btn tlg-btn-danger tlg-archive-del" data-nid="' + node.id + '" style="margin-left:auto">✕</button></div></div>';
-        }).join("");
-        container.querySelectorAll(".tlg-archive-view").forEach(function (btn) { btn.onclick = function () { switchTab("tree"); openBriefPanel(btn.dataset.nid); }; });
-        container.querySelectorAll(".tlg-archive-jump").forEach(function (btn) { btn.onclick = function () { jumpToNode(btn.dataset.nid); }; });
-        container.querySelectorAll(".tlg-archive-del").forEach(function (btn) {
-            btn.onclick = function () {
-                if (btn.dataset.nid === state.currentNodeId) { toast("无法删除当前所在节点。"); return; }
-                var n = findNode(btn.dataset.nid);
-                if (!confirm("确定删除节点「" + (n ? n.name : "") + "」？")) return;
-                deleteNode(btn.dataset.nid);
-            };
-        });
-        container.querySelectorAll(".tlg-archive-graft").forEach(function (btn) {
-            btn.onclick = function () { showGraftModal(btn.dataset.nid); };
-        });
-    }
-        function deleteNode(nodeId) {
+    // ── 节点操作 ──
+    function deleteNode(nodeId) {
         var node = findNode(nodeId); if (!node) return;
         // 禁止删除根节点
         if (!node.parentId) { toast("无法删除根节点（起源点）。"); return; }
@@ -550,196 +494,162 @@
         if (state.currentNodeId === nodeId) state.currentNodeId = node.parentId;
         saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
     }
-
-
-    // 嫁接：把 nodeId 从当前父节点摘下，挂到 newParentId 下
-    function graftNode(nodeId, newParentId) {
-        if (nodeId === newParentId) { toast("不能嫁接到自身。"); return; }
+    function renameNode(nodeId) {
         var node = findNode(nodeId); if (!node) return;
-        // 检查 newParentId 不在 nodeId 的子树里（防止成环）
-        function isDescendant(ancestorId, targetId) {
-            var n = findNode(targetId); if (!n) return false;
-            if (n.parentId === ancestorId) return true;
-            return n.parentId ? isDescendant(ancestorId, n.parentId) : false;
-        }
-        if (isDescendant(nodeId, newParentId)) { toast("目标节点是此节点的子孙，无法嫁接（会形成环）。"); return; }
-        // 从旧父节点移除
-        var oldParent = findNode(node.parentId);
-        if (oldParent) oldParent.children = oldParent.children.filter(function (id) { return id !== nodeId; });
-        // 挂到新父节点
-        var newParent = findNode(newParentId);
-        if (!newParent) { toast("目标节点不存在。"); return; }
-        if (newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
-        node.parentId = newParentId;
-        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已嫁接至「" + newParent.name + "」。");
-    }
-
-    function showGraftModal(nodeId) {
-        var node = findNode(nodeId); if (!node) return;
-        var candidates = state.nodes.filter(function (n) { return n.id !== nodeId; });
-        if (!candidates.length) { toast("没有可嫁接的目标节点。"); return; }
-        var existing = document.getElementById("tlg-graft-modal"); if (existing) existing.remove();
-        var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
-        var opts = candidates.map(function (n) {
-            return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + (n.id === node.parentId ? " (当前父节点)" : "") + '</option>';
-        }).join("");
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⇢ 嫁接节点</div>' +
-            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其全部子树，移动到选定的新父节点下。</div>' +
-            '<label class="tlg-label">选择新父节点</label>' +
-            '<select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
-            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-graft-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-graft-ok">确认嫁接</button></div></div>';
+        var existing = document.getElementById("tlg-rename-modal"); if (existing) existing.remove();
+        var backdrop = document.createElement("div"); backdrop.id = "tlg-rename-modal";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;";
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">✏️ 重命名</div><div style="margin-bottom:12px"><input class="tlg-input" id="tlg-ren-name" value="' + escHtml(node.name) + '" /></div><div style="margin-bottom:12px"><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-ren-brief">' + escHtml(node.brief || "") + '</textarea></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-ren-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-ren-ok">确认</button></div></div>';
         document.body.appendChild(backdrop);
-        // 默认选中当前父节点以外的第一个
-        var sel = backdrop.querySelector("#tlg-graft-target");
-        var nonParent = candidates.find(function (n) { return n.id !== node.parentId; });
-        if (nonParent) sel.value = nonParent.id;
-        backdrop.querySelector("#tlg-graft-cancel").onclick = function () { backdrop.remove(); };
-        backdrop.querySelector("#tlg-graft-ok").onclick = function () {
-            var targetId = sel.value;
-            if (!targetId) { toast("请选择目标节点。"); return; }
-            graftNode(nodeId, targetId);
-            backdrop.remove();
+        backdrop.querySelector("#tlg-ren-cancel").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-ren-ok").onclick = function () {
+            node.name = backdrop.querySelector("#tlg-ren-name").value.trim() || node.name;
+            node.brief = backdrop.querySelector("#tlg-ren-brief").value.trim();
+            saveCurrentWorld(); renderCanvas(); refreshArchive(); backdrop.remove(); toast("已更新。");
         };
         backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
     }
 
+    // ── 嫁接 ──
+    function showGraftModal(nodeId) {
+        var node = findNode(nodeId); if (!node || !node.parentId) { toast("根节点不可嫁接。"); return; }
+        var existing = document.getElementById("tlg-graft-modal"); if (existing) existing.remove();
+        var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;";
+        var opts = state.nodes.filter(function (n) { return n.id !== nodeId && getPathToRoot(nodeId).indexOf(n.id) === -1; });
+        var optionsHtml = opts.map(function (n) {
+            return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + ' (#' + n.msgIdx + ')</option>';
+        }).join("");
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">🌿 嫁接节点</div><p style="font-size:12px;color:#aaa;">将【' + escHtml(node.name) + '】移动到新的父节点下:</p><div style="margin-bottom:12px"><select class="tlg-input" id="tlg-graft-target">' + optionsHtml + '</select></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-graft-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-graft-ok">确认嫁接</button></div></div>';
+        document.body.appendChild(backdrop);
+        backdrop.querySelector("#tlg-graft-cancel").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-graft-ok").onclick = function () {
+            var targetId = backdrop.querySelector("#tlg-graft-target").value;
+            if (!targetId) { backdrop.remove(); return; }
+            var oldParent = findNode(node.parentId);
+            if (oldParent) oldParent.children = oldParent.children.filter(function (id) { return id !== nodeId; });
+            node.parentId = targetId;
+            var newParent = findNode(targetId);
+            if (newParent && newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
+            saveCurrentWorld(); renderCanvas(); refreshArchive(); backdrop.remove(); toast("嫁接完成。");
+        };
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
+    }
+
+    // ── 节点简报面板 ──
+    function showBriefPanel(nodeId) {
+        var node = findNode(nodeId); if (!node) return;
+        closeBriefPanel();
+        var panel = document.createElement("div"); panel.id = "tlg-brief-panel";
+        panel.style.cssText = "position:absolute;top:10px;right:10px;width:220px;max-height:60%;background:#0a0a12;border:1px solid #2a2a3a;border-radius:6px;padding:14px;overflow-y:auto;z-index:100;color:#e0e0e8;font-size:12px;line-height:1.5;";
+        var isCurrent = node.id === state.currentNodeId;
+        panel.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;font-size:13px;">' + escHtml(node.name) + '</div>' +
+            '<div style="color:#9a9ab0;margin-bottom:6px;">楼层 #' + node.msgIdx + '</div>' +
+            (node.brief ? '<div style="margin-bottom:10px;color:#c0c0d0;">' + escHtml(node.brief) + '</div>' : '') +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+            (isCurrent ? '' : '<button type="button" class="tlg-btn tlg-btn-primary tlg-brief-jump" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">跳转</button>') +
+            '<button type="button" class="tlg-btn tlg-brief-rename" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">重命名</button>' +
+            '<button type="button" class="tlg-btn tlg-brief-graft" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">嫁接</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger tlg-brief-del" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">删除</button>' +
+            '</div>';
+        var canvasWrap = document.getElementById("tlg-canvas-wrap"); if (canvasWrap) canvasWrap.appendChild(panel);
+        var jumpBtn = panel.querySelector(".tlg-brief-jump");
+        if (jumpBtn) jumpBtn.onclick = function () { jumpToNode(nodeId); };
+        panel.querySelector(".tlg-brief-rename").onclick = function () { renameNode(nodeId); closeBriefPanel(); };
+        panel.querySelector(".tlg-brief-graft").onclick = function () { showGraftModal(nodeId); closeBriefPanel(); };
+        panel.querySelector(".tlg-brief-del").onclick = function () { if (confirm("确认删除节点 \"" + node.name + "\"？")) { deleteNode(nodeId); closeBriefPanel(); } };
+    }
+    function closeBriefPanel() { var p = document.getElementById("tlg-brief-panel"); if (p) p.remove(); }
+
+    // ══════════════════════════════════════
+    // ③ 因果总结
+    // ══════════════════════════════════════
+    function buildEndpoint(baseUrl, path) {
+        if (!baseUrl) return path;
+        var url = baseUrl.replace(/\/+$/, "");
+        if (url.match(/\/v1$/i)) return url + path;
+        return url + "/v1" + path;
+    }
     function refreshSummary() {
         var list = document.getElementById("tlg-summary-list"); if (!list) return;
         if (!state.summaries || !state.summaries.length) {
-            list.innerHTML = '<div style="color:#5a5a6a;padding:40px 12px;text-align:center;font-style:italic;letter-spacing:1px;">虚空寂寂，尚无因果被铭刻于此。</div>'; return;
+            list.innerHTML = '<div style="text-align:center;color:#6a6a7a;padding:20px;font-size:12px;">暂无提取记录。</div><button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;">📋 补全历史切片</button>';
+            var cb = document.getElementById("tlg-summary-catchup-btn");
+            if (cb) cb.addEventListener("click", function () { runCatchupSummary(); });
+            return;
         }
         var latest = state.summaries[state.summaries.length - 1];
         var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
         var latestFloor = (latest.floorFrom >= 0 && latest.floorTo >= 0) ? ' · #' + latest.floorFrom + '~#' + latest.floorTo : '';
-        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>'+ '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;">📋 补全历史切片</button>';
-        document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { openSummaryHistory(); });
-        var catchupBtn = document.getElementById("tlg-summary-catchup-btn"); if (catchupBtn) catchupBtn.addEventListener("click", function () { runCatchupSummary(); });
-}
-        
-    function openSummaryHistory() {
-        var old = document.getElementById("tlg-summary-fullscreen"); if (old) old.remove();
-        var container = document.createElement("div"); container.id = "tlg-summary-fullscreen";
-        container.style.cssText = "position:absolute;inset:0;z-index:10;background:#000000;display:flex;flex-direction:column;overflow:hidden;";
-        var header = document.createElement("div");
-        header.style.cssText = "display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #2a2a3a;flex-shrink:0;";
-        header.innerHTML = '<button type="button" class="tlg-btn" id="tlg-sh-back" style="padding:6px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">← 返回</button><input type="text" id="tlg-sh-search" placeholder="检索关键词…" style="flex:1;padding:8px 12px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:14px;outline:none;min-width:0;" /><span id="tlg-sh-count" style="font-size:12px;color:#7a7a8a;flex-shrink:0;white-space:nowrap;">' + (state.summaries ? state.summaries.length : 0) + ' 条</span>';
-        container.appendChild(header);
-        var listWrap = document.createElement("div"); listWrap.id = "tlg-sh-list";
-        listWrap.style.cssText = "flex:1;overflow-y:auto;padding:12px;-webkit-overflow-scrolling:touch;";
-        container.appendChild(listWrap);
-        var body = document.getElementById("tlg-body"); if (!body) return; body.appendChild(container);
-        renderSummaryList("");
-        document.getElementById("tlg-sh-back").addEventListener("click", function () { container.remove(); });
-        document.getElementById("tlg-sh-search").addEventListener("input", function () { renderSummaryList(this.value.trim().toLowerCase()); });
+        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button><button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;">📋 补全历史切片</button>';
+        document.getElementById("tlg-summary-history-btn").addEventListener("click", showSummaryHistory);
+        var cb2 = document.getElementById("tlg-summary-catchup-btn");
+        if (cb2) cb2.addEventListener("click", function () { runCatchupSummary(); });
     }
+    function refreshArchive() { refreshSummary(); }
 
-    function renderSummaryList(keyword) {
+    function showSummaryHistory() {
+        var wrap = document.getElementById("tlg-summary-wrap"); if (!wrap) return;
+        wrap.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;"><button type="button" class="tlg-btn" id="tlg-sh-back" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">← 返回</button><span style="font-size:13px;color:#e0e0e8;">档案记录</span><span style="font-size:11px;color:#7a7a8a;margin-left:auto;">共 ' + state.summaries.length + ' 条</span></div><div id="tlg-sh-list" style="overflow-y:auto;flex:1;"></div>';
+        document.getElementById("tlg-sh-back").addEventListener("click", function () { renderSummarySection(wrap); });
+        renderSummaryList();
+    }
+    function renderSummaryList(filter) {
         var listWrap = document.getElementById("tlg-sh-list"); if (!listWrap) return;
-        var items = (state.summaries || []).slice().reverse();
-        if (keyword) { items = items.filter(function (s) { return (s.text || "").toLowerCase().indexOf(keyword) !== -1; }); }
-        var countEl = document.getElementById("tlg-sh-count"); if (countEl) countEl.textContent = items.length + " 条";
-        if (!items.length) {
-            listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return;
-        }
-                listWrap.innerHTML = items.map(function (s, displayIdx) {
+        var items = state.summaries;
+        if (filter) items = items.filter(function (s) { return s.text && s.text.toLowerCase().indexOf(filter.toLowerCase()) !== -1; });
+        listWrap.innerHTML = items.map(function (s, displayIdx) {
             var realIdx = state.summaries.indexOf(s);
             var floorInfo = (s.floorFrom >= 0 && s.floorTo >= 0) ? ' · <span style="color:#9999bb;">#' + s.floorFrom + '~#' + s.floorTo + '</span>' : '';
             return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + floorInfo + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
         }).join("");
         listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                var idx = Number(btn.dataset.idx);
-                var textDiv = document.getElementById("tlg-sh-text-" + idx);
-                var editArea = document.getElementById("tlg-sh-editarea-" + idx);
-                if (textDiv) textDiv.style.display = "none"; if (editArea) editArea.style.display = "block"; btn.style.display = "none";
+                var idx = parseInt(btn.dataset.idx, 10); var area = document.getElementById("tlg-sh-editarea-" + idx);
+                if (area) area.style.display = area.style.display === "none" ? "block" : "none";
             });
         });
         listWrap.querySelectorAll(".tlg-sh-save").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                flashBtn(this); var idx = Number(btn.dataset.idx); var ta = document.getElementById("tlg-sh-ta-" + idx);
-                if (ta && state.summaries[idx]) state.summaries[idx].text = ta.value;
-                saveCurrentWorld(); refreshSummary();
-                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("档案已更新。");
+                var idx = parseInt(btn.dataset.idx, 10); var ta = document.getElementById("tlg-sh-ta-" + idx);
+                if (ta && state.summaries[idx]) { state.summaries[idx].text = ta.value; saveCurrentWorld(); renderSummaryList(); toast("已保存。"); }
             });
         });
         listWrap.querySelectorAll(".tlg-sh-del").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                var idx = Number(btn.dataset.idx); if (!confirm("确定抹除这条记录？")) return;
-                state.summaries.splice(idx, 1); saveCurrentWorld(); refreshSummary();
-                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("已抹除。");
+                var idx = parseInt(btn.dataset.idx, 10);
+                if (confirm("确认抹除第 " + (idx + 1) + " 条？")) { state.summaries.splice(idx, 1); saveCurrentWorld(); renderSummaryList(); toast("已抹除。"); }
             });
         });
     }
-
-    // ── AI 接口 ──
-    function updateInjection() {
-        var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
-        if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 6); return; }
-        var items;
-        if (globalApi.summaryFilterMode !== false) {
-            var path = getPathToRoot(state.currentNodeId);
-            items = state.summaries.filter(function (s) { return !s.nodeId || path.indexOf(s.nodeId) !== -1; });
-        } else { items = state.summaries.slice(); }
-        if (!items.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 6); return; }
-        var count = Math.min(3, items.length); var recent = items.slice(-count);
-        var template = globalApi.vectorPrompt || ""; var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
-        var injectionText = (template && template.indexOf("{{context}}") !== -1) ? template.replace("{{context}}", content) : "以下为已记录的近期因果档案：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
-        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 6);
+    function renderSummarySection(wrap) {
+        if (!wrap) wrap = document.getElementById("tlg-summary-wrap"); if (!wrap) return;
+        var s = globalApi;
+        wrap.innerHTML = '<div style="margin-bottom:12px"><label class="tlg-label">手动提取最近 <input id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:50px;background:#111;border:1px solid #333;color:#eee;border-radius:3px;padding:2px 4px;text-align:center;"> 条消息</label><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:8px;width:100%">⚡ 手动切片</button></div><div id="tlg-summary-list"></div>';
+        document.getElementById("tlg-summary-run").addEventListener("click", function () { runSummary(false); });
+        document.getElementById("tlg-manual-count").addEventListener("change", function () { globalApi.manualCount = Math.max(1, parseInt(this.value, 10) || 20); saveGlobalApi(); });
+        refreshSummary();
     }
+
+    // ══════════════════════════════════════
+    // 注入 AI（向量 / 直接）
+    // ══════════════════════════════════════
     function updateInjectionWithVector() {
-        var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
-        if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 6); return; }
-        var vecUrl = (globalApi.vectorUrl || "").trim(), vecKey = (globalApi.vectorKey || "").trim(), vecModel = (globalApi.vectorModel || "").trim();
-        if (!vecUrl || !vecModel) { updateInjection(); return; }
-        var chat = (st.chat || []).slice(-5).map(function (m) { return (m.mes || "").slice(0, 200); }).join(" ");
-        fetch(buildEndpoint(vecUrl, "/embeddings"), {
-            method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
-            body: JSON.stringify({ model: vecModel, input: chat })
-        }).then(function (r) { return r.json(); }).then(function (data) {
-            var queryVec = data.data && data.data[0] && data.data[0].embedding; if (!queryVec) { updateInjection(); return; }
-            var pool;
-            if (globalApi.summaryFilterMode !== false) {
-                var path = getPathToRoot(state.currentNodeId);
-                pool = state.summaries.filter(function (s) { return !s.nodeId || path.indexOf(s.nodeId) !== -1; });
-            } else { pool = state.summaries.slice(); }
-            var texts = pool.map(function (s) { return s.text; });
-            return fetch(buildEndpoint(vecUrl, "/embeddings"), {
-                method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
-                body: JSON.stringify({ model: vecModel, input: texts })
-            }).then(function (r2) { return r2.json(); }).then(function (data2) {
-                var embeddings = (data2.data || []).map(function (d) { return d.embedding; });
-                var scored = embeddings.map(function (emb, idx) {
-                    var dot = 0, na = 0, nb = 0;
-                    for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
-                    return { idx: idx, score: dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8) };
-                }).sort(function (a, b) { return b.score - a.score; });
-                var top = scored.slice(0, 3);
-                var content = top.map(function (t) { return pool[t.idx].text; }).join("\n\n---\n\n");
-                var template = globalApi.vectorPrompt || "";
-                var injectionText = template.indexOf("{{context}}") !== -1 ? template.replace("{{context}}", content) : "以下为与当前情境相关的因果档案：\n\n" + content;
-                st.setExtensionPrompt(EXT_NAME, injectionText, 1, 6);
-            });
-        }).catch(function () { updateInjection(); });
+        var st = getST(); if (!st) return;
+        if (!state.summaries || !state.summaries.length) {
+            if (typeof st.setExtensionPrompt === "function") st.setExtensionPrompt(EXT_NAME, "", 1, 0);
+            return;
+        }
+        var text = state.summaries.map(function (s) { return s.text; }).join("\n\n---\n\n");
+        var prompt = (globalApi.vectorPrompt || "{{context}}").replace("{{context}}", text);
+        if (typeof st.setExtensionPrompt === "function") st.setExtensionPrompt(EXT_NAME, prompt, 1, 0);
     }
 
-    function buildEndpoint(base, path) {
-        var url = (base || "").trim().replace(/\/+$/, "");
-        if (path === "/chat/completions" && /\/chat\/completions$/.test(url)) return url;
-        if (path === "/models" && /\/models$/.test(url)) return url;
-        if (!/\/v\d+/.test(url)) url += "/v1"; return url + path;
-    }
-
-    // ══════════════════════════════════════
-    // ② 总结函数拆分：
-    //   runSummaryWithMessages(messages) —— 传入已收集好的消息数组，用于跳转前自动总结
-    //   runSummary(auto)                 —— 手动/自动触发，取当前可见消息
-    // ══════════════════════════════════════
     function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
-        if (!apiUrl) { toast("切片失败：未设置 API 地址。"); return; }
-        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); return; }
+        if (!apiUrl) { toast("切片失败：未设置 API 地址。"); if (typeof onDone === "function") onDone(); return; }
+        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); if (typeof onDone === "function") onDone(); return; }
 
         // 计算楼层范围
         var st = getST();
@@ -781,7 +691,7 @@
                     timestamp: Date.now(), text: text, nodeId: state.currentNodeId,
                     floorFrom: firstFloor, floorTo: lastFloor
                 });
-                                // 记录最后一次自动总结的范围（用于 swipe 重写）
+                // 记录最后一次自动总结的范围（用于 swipe 重写）
                 if (auto && firstFloor >= 0 && lastFloor >= 0) {
                     state.lastAutoSummaryRange = {
                         floorFrom: firstFloor,
@@ -807,11 +717,11 @@
                 }
             }
         }).catch(function (e) { toast("✗ " + label + "切片失败：" + e.message); })
-                .then(function () {
+        .then(function () {
             if (btn) btn.disabled = false;
             if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
             if (typeof onDone === "function") onDone();
-               });
+        });
     }
 
     function runSummaryWithMessages(messagesArray) {
@@ -826,6 +736,7 @@
         var recent = visible.slice(-count);
         _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
     }
+
     function runCatchupSummary() {
         var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
         ensureWorldExists();
@@ -860,14 +771,14 @@
         toast("📋 开始补全历史切片，共 " + batches.length + " 批…");
         var sendBtn = document.getElementById("send_but");
         if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
-        var btn = document.getElementById("tlg-summary-catchup-btn"); if (btn) btn.disabled = true;
+        var catchBtn = document.getElementById("tlg-summary-catchup-btn"); if (catchBtn) catchBtn.disabled = true;
 
         var idx = 0;
-                function nextBatch() {
+        function nextBatch() {
             if (idx >= batches.length) {
                 toast("✓ 历史补全完成，共 " + batches.length + " 批。");
                 if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
-                if (btn) btn.disabled = false;
+                if (catchBtn) catchBtn.disabled = false;
                 return;
             }
             var batch = batches[idx]; idx++;
@@ -876,240 +787,226 @@
         nextBatch();
     }
 
-    function fetchModelList() {
-        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
-        if (!apiUrl) { toast("请先设置 API 地址。"); return; }
-        var btn = document.getElementById("tlg-fetch-models"); if (btn) btn.disabled = true; toast("正在检测可用模型…");
-        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
-        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
-        .then(function (data) {
-            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
-            globalApi.modelList = models; saveGlobalApi(); populateModelSelect(); toast("已识别 " + models.length + " 个核心模型。");
-        }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
-    }
-    function populateModelSelect() {
-        var sel = document.getElementById("tlg-model-select"); if (!sel) return;
-        sel.innerHTML = '<option value="">-- 选择演算核心 --</option>' + (globalApi.modelList || []).map(function (m) { return '<option value="' + escHtml(m) + '"' + (m === globalApi.model ? " selected" : "") + ">" + escHtml(m) + "</option>"; }).join("");
-    }
-    function fetchVectorModelList() {
-        var apiUrl = (globalApi.vectorUrl || "").trim(), apiKey = (globalApi.vectorKey || "").trim();
-        if (!apiUrl) { toast("请先设置向量 API 地址。"); return; }
-        var btn = document.getElementById("tlg-fetch-vec-models"); if (btn) btn.disabled = true; toast("检测向量模型…");
-        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
-        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
-        .then(function (data) {
-            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
-            globalApi.vectorModelList = models; saveGlobalApi(); populateVectorModelSelect(); toast("已识别 " + models.length + " 个向量模型。");
-        }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
-    }
-    function populateVectorModelSelect() {
-        var sel = document.getElementById("tlg-vec-model-select"); if (!sel) return;
-        sel.innerHTML = '<option value="">-- 选择辅助核心 --</option>' + (globalApi.vectorModelList || []).map(function (m) { return '<option value="' + escHtml(m) + '"' + (m === globalApi.vectorModel ? " selected" : "") + ">" + escHtml(m) + "</option>"; }).join("");
-    }
-
-    function refreshWorlds() {
-        var container = document.getElementById("tlg-worlds-list"); if (!container) return;
-        var chatId = getCurrentChatId(), ids = Object.keys(worlds).sort(function (a, b) { return (worlds[b].updatedAt || 0) - (worlds[a].updatedAt || 0); });
-        if (!ids.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">万流归虚——尚无被观测的世界。</div>'; return; }
-        container.innerHTML = ids.map(function (wid) {
-            var w = worlds[wid], isCurrent = wid === currentWorldId, isLinked = w.chatId === chatId && chatId;
-            return '<div style="background:#050508;border:1px solid ' + (isCurrent ? "#ffffff" : "#2a2a3a") + ';border-radius:4px;padding:12px;margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-size:14px;font-weight:600;color:#ffffff;">' + escHtml(w.name) + (isCurrent ? ' <span style="font-size:11px;color:#7a7a8a">(当前观测焦点)</span>' : "") + '</div><button type="button" class="tlg-btn tlg-btn-danger tlg-worlds-del" data-wid="' + wid + '" style="font-size:11px;padding:4px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div style="font-size:11px;color:#7a7a8a;margin-top:4px;">刻度: ' + (w.nodes ? w.nodes.length : 0) + ' | 档案: ' + (w.summaries ? w.summaries.length : 0) + '</div><div style="font-size:11px;color:#7a7a8a;">标识: ' + escHtml(w.chatId || "未关联") + '</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' + (!isCurrent && isLinked ? '<button type="button" class="tlg-btn tlg-btn-primary tlg-worlds-switch" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">聚焦于此</button>' : "") + (!isLinked && !isCurrent ? '<button type="button" class="tlg-btn tlg-worlds-link" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">连接当前世界</button>' : "") + '<button type="button" class="tlg-btn tlg-worlds-rename" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">重命名</button><button type="button" class="tlg-btn tlg-worlds-export" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">提取源数据</button></div></div>';
-        }).join("");
-        container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
-        container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
-        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖。"); }); });
-        container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
-        container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界。"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭。")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩。"); }); });
-    }
-    function importWorld() {
-        var input = document.createElement("input"); input.type = "file"; input.accept = ".json";
-        input.onchange = function () {
-            var file = input.files[0]; if (!file) return; var reader = new FileReader();
-            reader.onload = function () {
-                try {
-                    var data = JSON.parse(reader.result);
-                    if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据。"); return; }
-                    var wid = data.id || generateId(); if (worlds[wid]) wid = generateId();
-                    data.id = wid; if (!data.name) data.name = file.name.replace(/\.json$/, "");
-                    if (!data.createdAt) data.createdAt = Date.now(); data.updatedAt = Date.now();
-                    worlds[wid] = data; saveWorlds(); refreshWorlds(); toast("连接建立: " + data.name);
-                } catch (e) { toast("维度侵入失败: " + e.message); }
-            }; reader.readAsText(file);
-        }; input.click();
+    // ══════════════════════════════════════
+    // ④ 世界管理弹窗
+    // ══════════════════════════════════════
+    function showWorldManager() {
+        var existing = document.getElementById("tlg-world-mgr"); if (existing) existing.remove();
+        var backdrop = document.createElement("div"); backdrop.id = "tlg-world-mgr";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
+        var html = '<div class="tlg-modal" style="max-width:420px;width:100%;"><div class="tlg-modal-title">🌐 世界管理</div><div id="tlg-wm-list" style="max-height:50vh;overflow-y:auto;margin-bottom:12px;">';
+        var ids = Object.keys(worlds);
+        for (var i = 0; i < ids.length; i++) {
+            var w = worlds[ids[i]], isCurrent = ids[i] === currentWorldId;
+            html += '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid ' + (isCurrent ? '#ffffff' : '#2a2a3a') + ';border-radius:4px;margin-bottom:6px;' + (isCurrent ? 'background:#1a1a2a;' : '') + '">';
+            html += '<span style="flex:1;font-size:12px;color:#e0e0e8;">' + escHtml(w.name) + (isCurrent ? ' <span style="color:#7a7a8a;">(当前)</span>' : '') + '</span>';
+            html += '<button type="button" class="tlg-btn tlg-wm-switch" data-wid="' + ids[i] + '" style="font-size:10px;padding:3px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">' + (isCurrent ? '✓' : '切换') + '</button>';
+            html += '<button type="button" class="tlg-btn tlg-btn-danger tlg-wm-del" data-wid="' + ids[i] + '" style="font-size:10px;padding:3px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button>';
+            html += '</div>';
+        }
+        html += '</div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-wm-close">关闭</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-wm-new">+ 手动新建世界</button></div></div>';
+        backdrop.innerHTML = html; document.body.appendChild(backdrop);
+        backdrop.querySelector("#tlg-wm-close").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-wm-new").onclick = function () {
+            var name = prompt("新世界名称:", "世界 " + (Object.keys(worlds).length + 1));
+            if (!name) return;
+            resetState(); currentWorldId = null;
+            ensureWorldExists(); worlds[currentWorldId].name = name; saveWorlds();
+            backdrop.remove(); showWorldManager();
+        };
+        backdrop.querySelectorAll(".tlg-wm-switch").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var wid = btn.dataset.wid;
+                if (wid === currentWorldId) return;
+                currentWorldId = wid; setLinkedWorldId(wid);
+                var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || [];
+                state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
+                state.selectedNodeId = null; state.turnsSinceAnchor = w.turnsSinceAnchor || 0;
+                saveCurrentWorld(); backdrop.remove(); showWorldManager(); toast("已切换至: " + w.name);
+                renderCanvas(); refreshArchive();
+            });
+        });
+        backdrop.querySelectorAll(".tlg-wm-del").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var wid = btn.dataset.wid;
+                if (!confirm("确认删除世界 \"" + (worlds[wid] && worlds[wid].name) + "\"？")) return;
+                delete worlds[wid];
+                if (currentWorldId === wid) { currentWorldId = null; resetState(); }
+                saveWorlds(); backdrop.remove(); showWorldManager(); toast("世界已删除。");
+            });
+        });
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
     }
 
-    function ensurePanelBuilt() {
-        if (document.getElementById("tlg-panel")) return;
-        var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
-        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:'result',-apple-system,sans-serif;overflow:hidden;";
-        panel.innerHTML = '<div id="tlg-tabs"><div class="tlg-tab active" data-tab="tree">命运分支线</div><div class="tlg-tab" data-tab="archive">观测坐标</div><div class="tlg-tab" data-tab="summary">因果档案</div><div class="tlg-tab" data-tab="worlds">诸世界</div><div class="tlg-tab" data-tab="engine">引擎核心</div><div id="tlg-close">✕</div></div><div id="tlg-body">' +
-            '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-center-cur" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">◎ 定位当前</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
-            '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">全部锚定坐标</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div><div id="tlg-archive-list"></div></div></div>' +
-            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div><div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式（按步数）</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">因果流转每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步自动触发</label></div><div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条上下文黏性</label></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案库上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条（超出自动清理最旧）</label></div></div><div class="tlg-section"><div class="tlg-section-title">记录仪指令覆写</div><label class="tlg-label">逻辑模板（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea><div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">主动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步因果痕迹</label></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div><div class="tlg-section"><div class="tlg-section-title">观测档案库</div><div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">查阅已记录的因果碎片，包含抹除与覆写权限。</div><div id="tlg-summary-list"></div></div></div></div>' +
-            '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">维度图谱</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-worlds-import" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">凝望异世界</button></div><div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">当前实体连接: ' + escHtml(getCurrentChatId() || "未知") + (currentWorldId ? " → " + escHtml((worlds[currentWorldId] || {}).name || "") : " (未建立)") + '</div><div id="tlg-worlds-list"></div></div></div>' +
-            '<div class="tlg-view" data-view="engine"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">主解析引擎</div><label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div><div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div><label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" /><label class="tlg-label">联想提示词指令</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">锁定核心配置</button></div></div></div>';
-        document.body.appendChild(panel); bindPanelEvents(panel);
-    }
-
+    // ══════════════════════════════════════
+    // ⑤ 面板 UI
+    // ══════════════════════════════════════
+    var panelBuilt = false;
     function openPanel() {
-        if (!isEnabled()) { toast("观测台已关闭，请解除权限限制。"); return; }
-        loadCurrentWorld(); migrateOldData();
-        var existingPanel = document.getElementById("tlg-panel"); if (existingPanel) existingPanel.remove();
-        ensurePanelBuilt(); var panel = document.getElementById("tlg-panel"); if (!panel) return;
-        panel.style.display = "flex"; document.body.style.overflow = "hidden";
-        (function animLoop() {
-            var p = document.getElementById("tlg-panel"); if (!p || p.style.display !== "flex") return;
-            renderCanvas(); requestAnimationFrame(animLoop);
-        })();
+        if (!isEnabled()) { toast("河岸凝视已关闭。"); return; }
+        ensurePanelBuilt(); var p = document.getElementById("tlg-panel"); if (p) { p.style.display = "flex"; document.body.style.overflow = "hidden"; }
+        loadCurrentWorld(); renderCanvas(); refreshArchive();
+        setTimeout(function () { if (state.currentNodeId) centerOnNode(state.currentNodeId); }, 100);
     }
-    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; }
-    function switchTab(name) {
-        var panel = document.getElementById("tlg-panel"); if (!panel) return;
-        panel.querySelectorAll(".tlg-tab").forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-tab") === name); });
-        panel.querySelectorAll(".tlg-view").forEach(function (v) { var on = v.getAttribute("data-view") === name; v.classList.toggle("active", on); v.style.display = on ? "flex" : "none"; });
-        if (name === "archive") refreshArchive(); else if (name === "summary") refreshSummary(); else if (name === "worlds") refreshWorlds(); else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); }
+    function closePanel() { var p = document.getElementById("tlg-panel"); if (p) { p.style.display = "none"; document.body.style.overflow = ""; } }
+    function ensurePanelBuilt() {
+        if (panelBuilt && document.getElementById("tlg-panel")) return;
+        var old = document.getElementById("tlg-panel"); if (old) old.remove();
+        var panel = document.createElement("div"); panel.id = "tlg-panel";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:'result',-apple-system,sans-serif;overflow:hidden;";
+        var s = globalApi;
+        panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #1a1a2a;flex-shrink:0;"><span style="font-size:15px;letter-spacing:1px;">河岸凝视</span><div style="display:flex;gap:8px;"><button type="button" class="tlg-btn" id="tlg-world-btn" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🌐 世界</button><button type="button" class="tlg-btn" id="tlg-close-btn" style="font-size:11px;padding:4px 10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 关闭</button></div></div>' +
+            '<div style="display:flex;flex:1;overflow:hidden;">' +
+            '<div id="tlg-canvas-wrap" style="flex:1;position:relative;overflow:hidden;background:#000000;"><canvas id="tlg-canvas" style="width:100%;height:100%;display:block;"></canvas></div>' +
+            '<div id="tlg-sidebar" style="width:320px;border-left:1px solid #1a1a2a;display:flex;flex-direction:column;overflow:hidden;background:#000000;flex-shrink:0;">' +
+            '<div style="display:flex;border-bottom:1px solid #1a1a2a;flex-shrink:0;"><button type="button" class="tlg-tab active" data-tab="archive">档案</button><button type="button" class="tlg-tab" data-tab="settings">设置</button></div>' +
+            '<div id="tlg-tab-archive" class="tlg-tab-content active" style="flex:1;overflow-y:auto;padding:14px;">' +
+            '<div style="margin-bottom:16px;"><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anchor-btn" style="width:100%;margin-bottom:8px;">⚓ 锚定因果节点</button></div>' +
+            '<div id="tlg-summary-wrap"></div>' +
+            '</div>' +
+            '<div id="tlg-tab-settings" class="tlg-tab-content" style="flex:1;overflow-y:auto;padding:14px;">' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">副 API 地址</label><input class="tlg-input" id="tlg-api-url" value="' + escHtml(s.apiUrl) + '" placeholder="https://..." /></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">API Key</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey) + '" /></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">模型</label><input class="tlg-input" id="tlg-api-model" value="' + escHtml(s.model) + '" /></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">向量注入提示词</label><textarea class="tlg-textarea" id="tlg-vector-prompt" rows="3">' + escHtml(s.vectorPrompt) + '</textarea></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">切片提示词</label><textarea class="tlg-textarea" id="tlg-summary-prompt" rows="4">' + escHtml(s.summaryPrompt) + '</textarea></div>' +
+            '<div style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">' +
+            '<label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="tlg-auto-mode" ' + (s.autoMode ? 'checked' : '') + ' /> 自律模式</label>' +
+            '<label style="font-size:12px;color:#aaa;">间隔 <input id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:40px;background:#111;border:1px solid #333;color:#eee;border-radius:3px;padding:2px;text-align:center;" /> 回合</label>' +
+            '</div>' +
+            '<div style="margin-bottom:14px;"><label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="tlg-jump-summary" ' + (s.jumpSummary ? 'checked' : '') + ' /> 跳转前自动切片</label></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">AI 可见最近消息数</label><input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" /></div>' +
+            '<div style="margin-bottom:14px;"><label class="tlg-label">最大总结保留数</label><input class="tlg-input" id="tlg-max-summaries" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" /></div>' +
+            '</div></div></div>';
+        document.body.appendChild(panel);
+        // inject styles
+        if (!document.getElementById("tlg-styles")) {
+            var style = document.createElement("style"); style.id = "tlg-styles";
+            style.textContent = '.tlg-modal{background:#0a0a12;border:1px solid #2a2a3a;border-radius:6px;padding:20px;max-width:360px;width:100%;box-sizing:border-box;}.tlg-modal-title{font-size:15px;margin-bottom:14px;color:#fff;}.tlg-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}.tlg-label{display:block;font-size:11px;color:#8a8a9a;margin-bottom:4px;}.tlg-input,.tlg-textarea{width:100%;padding:8px 10px;background:#050508;border:1px solid #2a2a3a;border-radius:4px;color:#e0e0e8;font-size:13px;box-sizing:border-box;outline:none;}.tlg-textarea{resize:vertical;min-height:60px;}.tlg-btn{padding:6px 14px;border:1px solid #3a3a4a;border-radius:4px;background:#0a0a12;color:#e0e0e8;cursor:pointer;font-size:12px;transition:all 0.15s;}.tlg-btn:hover{border-color:#6a6a7a;background:#1a1a2a;}.tlg-btn-primary{background:#1a1a3a;border-color:#4a4a6a;}.tlg-btn-primary:hover{background:#2a2a4a;border-color:#7a7a9a;}.tlg-btn-danger{border-color:#4a2a2a;color:#ff6b6b;}.tlg-btn-danger:hover{background:#2a1a1a;border-color:#6a3a3a;}.tlg-tab{flex:1;padding:10px;background:transparent;border:none;color:#6a6a7a;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;}.tlg-tab.active{color:#ffffff;border-bottom-color:#ffffff;}.tlg-tab-content{display:none;}.tlg-tab-content.active{display:flex;flex-direction:column;}';
+            document.head.appendChild(style);
+        }
+        bindPanelEvents(panel); panelBuilt = true;
     }
-
     function bindPanelEvents(panel) {
-        document.getElementById("tlg-close").onclick = closePanel;
-        panel.querySelectorAll(".tlg-tab").forEach(function (tab) { tab.onclick = function () { switchTab(tab.getAttribute("data-tab")); }; });
-        document.getElementById("tlg-brief-close").onclick = closeBriefPanel;
-        document.getElementById("tlg-canvas-anchor").onclick = function () { showAnchorModal(); };
-        document.getElementById("tlg-canvas-center-cur").onclick = function () { centerOnCurrentNode(); };
-        document.getElementById("tlg-canvas-reset-view").onclick = function () { camX = 0; camY = 0; camZoom = 1; };
-        document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
-        document.getElementById("tlg-worlds-import").addEventListener("click", importWorld);
-        document.getElementById("tlg-auto-toggle").addEventListener("click", function () { globalApi.autoMode = !globalApi.autoMode; this.classList.toggle("on", globalApi.autoMode); saveGlobalApi(); });
-        document.getElementById("tlg-auto-interval").addEventListener("change", function () { globalApi.autoInterval = Math.max(1, parseInt(this.value, 10) || 10); saveGlobalApi(); });
-        document.getElementById("tlg-jump-summary-toggle").addEventListener("click", function () { globalApi.jumpSummary = !globalApi.jumpSummary; this.classList.toggle("on", globalApi.jumpSummary); saveGlobalApi(); });
-        document.getElementById("tlg-last-n").addEventListener("change", function () { globalApi.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5); saveGlobalApi(); });
-        document.getElementById("tlg-summary-max").addEventListener("change", function () { globalApi.summaryMaxCount = Math.max(10, parseInt(this.value, 10) || 100); saveGlobalApi(); });
-        document.getElementById("tlg-summary-prompt").addEventListener("change", function () { globalApi.summaryPrompt = this.value; saveGlobalApi(); });
+        panel.querySelector("#tlg-close-btn").onclick = closePanel;
+        panel.querySelector("#tlg-world-btn").onclick = showWorldManager;
+        panel.querySelector("#tlg-anchor-btn").onclick = function () { showAnchorModal(); };
+        panel.querySelectorAll(".tlg-tab").forEach(function (tab) {
+            tab.addEventListener("click", function () {
+                panel.querySelectorAll(".tlg-tab").forEach(function (t) { t.classList.remove("active"); });
+                panel.querySelectorAll(".tlg-tab-content").forEach(function (c) { c.classList.remove("active"); });
+                tab.classList.add("active");
+                document.getElementById("tlg-tab-" + tab.dataset.tab).classList.add("active");
+            });
+        });
+        // canvas
+        canvas = panel.querySelector("#tlg-canvas"); ctx = canvas.getContext("2d");
+        canvas.addEventListener("pointerdown", function (e) {
+            if (e.button === 0) { isPanning = true; panStartX = e.clientX - camX; panStartY = e.clientY - camY; canvas.setPointerCapture(e.pointerId); }
+        });
+        canvas.addEventListener("pointermove", function (e) { if (isPanning) { camX = e.clientX - panStartX; camY = e.clientY - panStartY; } });
+        canvas.addEventListener("pointerup", function (e) { isPanning = false; });
+        canvas.addEventListener("click", function (e) {
+            var hit = canvasHitTest(e.clientX, e.clientY);
+            if (hit) { state.selectedNodeId = hit; var positions = layoutTree(); if (positions[hit]) triggerRipple(positions[hit].x, positions[hit].y); showBriefPanel(hit); }
+            else { state.selectedNodeId = null; closeBriefPanel(); }
+        });
+        canvas.addEventListener("dblclick", function (e) {
+            var hit = canvasHitTest(e.clientX, e.clientY);
+            if (hit && hit !== state.currentNodeId) jumpToNode(hit);
+        });
+        canvas.addEventListener("wheel", function (e) { e.preventDefault(); var d = e.deltaY > 0 ? 0.9 : 1.1; camZoom = Math.max(0.3, Math.min(3, camZoom * d)); }, { passive: false });
+        // settings bindings
+        var ids = ["tlg-api-url", "tlg-api-key", "tlg-api-model", "tlg-vector-prompt", "tlg-summary-prompt", "tlg-last-n", "tlg-auto-interval", "tlg-max-summaries"];
+        var keys = ["apiUrl", "apiKey", "model", "vectorPrompt", "summaryPrompt", "lastNMessages", "autoInterval", "summaryMaxCount"];
+        for (var i = 0; i < ids.length; i++) {
+            (function (id, key) {
+                var el = document.getElementById(id); if (!el) return;
+                el.addEventListener("change", function () {
+                    var v = el.value; if (el.type === "number") v = parseInt(v, 10) || 0;
+                    globalApi[key] = v; saveGlobalApi();
+                });
+            })(ids[i], keys[i]);
+        }
+        document.getElementById("tlg-auto-mode").addEventListener("change", function () { globalApi.autoMode = this.checked; saveGlobalApi(); });
+        document.getElementById("tlg-jump-summary").addEventListener("change", function () { globalApi.jumpSummary = this.checked; saveGlobalApi(); });
         document.getElementById("tlg-manual-count").addEventListener("change", function () { globalApi.manualCount = Math.max(1, parseInt(this.value, 10) || 20); saveGlobalApi(); });
-        document.getElementById("tlg-summary-run").addEventListener("click", function () { flashBtn(this); runSummary(false); });
-        document.getElementById("tlg-engine-save").addEventListener("click", function () {
-            flashBtn(this);
-            globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim();
-            globalApi.apiKey = document.getElementById("tlg-api-key").value.trim();
-            globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
-            globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
-            globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value;
-            globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
-            globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value;
-            saveGlobalApi(); toast("引擎设置已锚定。");
-        });
-        document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
-        document.getElementById("tlg-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-model-manual").value = this.value; });
-        document.getElementById("tlg-vec-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-vec-model").value = this.value; });
-        document.getElementById("tlg-fetch-vec-models").addEventListener("click", function () { flashBtn(this); globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim(); globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim(); saveGlobalApi(); fetchVectorModelList(); });
-        document.getElementById("tlg-test-api").addEventListener("click", function () {
-            var url = document.getElementById("tlg-api-url").value.trim(), key = document.getElementById("tlg-api-key").value.trim();
-            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送探针…");
-            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
-        });
-        document.getElementById("tlg-test-vec-api").addEventListener("click", function () {
-            var url = document.getElementById("tlg-vec-url").value.trim(), key = document.getElementById("tlg-vec-key").value.trim();
-            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送辅助探针…");
-            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 辅助节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
-        });
-        initCanvasEvents();
+        renderSummarySection(document.getElementById("tlg-summary-wrap"));
+        renderCanvas();
     }
 
-    function initCanvasEvents() {
-        var wrap = document.getElementById("tlg-canvas-wrap"); if (!wrap) return;
-        canvas = document.getElementById("tlg-tree-canvas"); ctx = canvas.getContext("2d");
-        if (typeof ResizeObserver !== "undefined") { new ResizeObserver(function () {}).observe(wrap); }
-        canvas.addEventListener("mousedown", function (e) {
-            if (e.button !== 0) return; var hit = canvasHitTest(e.clientX, e.clientY);
-            if (hit) {
-                var rct = canvas.getBoundingClientRect();
-                var wx = (e.clientX - rct.left - rct.width / 2 - camX) / camZoom;
-                var wy = (e.clientY - rct.top - rct.height / 2 - camY) / camZoom;
-                triggerRipple(wx, wy); openBriefPanel(hit); return;
-            }
-            isPanning = true; panStartX = e.clientX - camX; panStartY = e.clientY - camY;
-        });
-        canvas.addEventListener("mousemove", function (e) { if (!isPanning) return; camX = e.clientX - panStartX; camY = e.clientY - panStartY; });
-        function endPan() { isPanning = false; }
-        canvas.addEventListener("mouseup", endPan); canvas.addEventListener("mouseleave", endPan);
-        canvas.addEventListener("wheel", function (e) { e.preventDefault(); camZoom = Math.max(0.2, Math.min(4, camZoom * (e.deltaY < 0 ? 1.1 : 0.91))); }, { passive: false });
-        var lastTouchDist = 0, touchStartHit = null, touchMoved = false;
-        canvas.addEventListener("touchstart", function (e) {
-            touchMoved = false;
-            if (e.touches.length === 1) { isPanning = true; panStartX = e.touches[0].clientX - camX; panStartY = e.touches[0].clientY - camY; touchStartHit = canvasHitTest(e.touches[0].clientX, e.touches[0].clientY); }
-            else if (e.touches.length === 2) { isPanning = false; lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
-        }, { passive: true });
-        canvas.addEventListener("touchmove", function (e) {
-            touchMoved = true;
-            if (e.touches.length === 1 && isPanning) { camX = e.touches[0].clientX - panStartX; camY = e.touches[0].clientY - panStartY; }
-            else if (e.touches.length === 2) { var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (lastTouchDist > 0) { camZoom = Math.max(0.2, Math.min(4, camZoom * (dist / lastTouchDist))); } lastTouchDist = dist; }
-        }, { passive: true });
-        canvas.addEventListener("touchend", function (e) {
-            if (!touchMoved && touchStartHit) {
-                var rct = canvas.getBoundingClientRect();
-                var wx = (e.changedTouches[0].clientX - rct.left - rct.width / 2 - camX) / camZoom;
-                var wy = (e.changedTouches[0].clientY - rct.top - rct.height / 2 - camY) / camZoom;
-                triggerRipple(wx, wy); openBriefPanel(touchStartHit);
-            }
-            isPanning = false; touchStartHit = null;
-        }, { passive: true });
-    }
-
+    // ══════════════════════════════════════
+    // 菜单按钮 & 设置面板注入
+    // ══════════════════════════════════════
     function injectMenuButton() {
-        if (!isEnabled()) { var old = document.getElementById("tlg-menu-btn"); if (old) old.remove(); return; }
-        var menu = document.getElementById("extensionsMenu"); if (!menu) return; if (document.getElementById("tlg-menu-btn")) return;
-        var btn = document.createElement("div"); btn.id = "tlg-menu-btn"; btn.className = "list-group-item flex-container flexGap5 interactable"; btn.style.cursor = "pointer";
-        btn.innerHTML = '<i class="fa-solid fa-water" style="color:#ffffff;text-shadow:0 0 4px rgba(0,0,0,0.8);"></i><span style="color:#ffffff;font-weight:900;text-shadow:1px 1px 3px #000000,0 0 8px rgba(0,0,0,0.6);letter-spacing:1px;">河岸凝视</span>';
-        btn.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); var p = document.getElementById("tlg-panel"); if (p && p.style.display === "flex") closePanel(); else openPanel(); });
-        menu.appendChild(btn);
+        if (document.getElementById("tlg_menu_btn")) return;
+        var targets = ["#extensionsMenu", "#leftNavDrawerContent", "#top-bar"];
+        var container = null;
+        for (var i = 0; i < targets.length; i++) { container = document.querySelector(targets[i]); if (container) break; }
+        if (!container) return;
+        var btn = document.createElement("div"); btn.id = "tlg_menu_btn";
+        btn.style.cssText = "cursor:pointer;padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc;";
+        btn.innerHTML = '<span style="font-size:16px;">🌊</span><span>河岸凝视</span>';
+        btn.onclick = function () { openPanel(); };
+        container.appendChild(btn);
     }
-    function injectSettingsPanel() {
-        if (document.getElementById("tlg_settings_block")) return;
-        var host = document.querySelector("#extensions_settings2") || document.querySelector("#extensions_settings") || document.querySelector("#extensions_settings1");
-        if (!host) return; var enabled = isEnabled();
-        var block = document.createElement("div"); block.id = "tlg_settings_block"; block.className = "extension_container";
-        block.innerHTML = '<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>🌊 河岸凝视</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;"><span>授予观测权限</span><div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div><div style="font-size:12px;opacity:.75;margin-bottom:10px;">解除或封锁观测台访问。</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">展开高维观测界面</button><div style="font-size:11px;opacity:.55;margin-top:10px;">快捷锚定：/tlg_anchor | 视野滤镜：/tlg_filter</div></div></div>';
-        host.appendChild(block);
-        document.getElementById("tlg_enable_toggle").onclick = function () { var next = !this.classList.contains("on"); this.classList.toggle("on", next); setEnabled(next); toast(next ? "观测权限已授予" : "观测权限已封锁"); };
-        document.getElementById("tlg_settings_open").onclick = function () { openPanel(); };
-    }
+    function injectSettingsPanel() {}
+
+    // ══════════════════════════════════════
+    // 斜杠命令
+    // ══════════════════════════════════════
     function registerSlashCommand() {
-        function wrap(value) { if (!isEnabled()) { toast("未授予观测权限。"); return ""; } loadCurrentWorld(); showAnchorModal(String(value || "")); return ""; }
-        var st = getST();
-        if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_anchor", function (a, v) { return wrap(v); }, [], "凝固当前因果刻度", true, true); }
-        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
-            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_anchor", callback: function (a, v) { return wrap(v); }, helpString: "建立新的因果锚点。" })); } catch (e) {}
-        }
-        function toggleFilter() {
-            if (!isEnabled()) { toast("未授予观测权限。"); return ""; }
-            globalApi.summaryFilterMode = !globalApi.summaryFilterMode; saveGlobalApi(); updateInjectionWithVector();
-            toast(globalApi.summaryFilterMode ? "视野滤镜：仅注视本时间线" : "视野滤镜：俯瞰全部因果纠缠"); return "";
-        }
-        if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_filter", function (a, v) { return toggleFilter(); }, [], "切换记忆视野滤镜", true, true); }
-        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
-            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_filter", callback: function (a, v) { return toggleFilter(); }, helpString: "切换提取记忆范围：本时间线/全部。" })); } catch (e) {}
-        }
+        try {
+            var st = getST();
+            if (st && st.registerSlashCommand) {
+                st.registerSlashCommand("tlg", function (args) {
+                    var sub = (args && args[0]) || "";
+                    if (sub === "open") openPanel();
+                    else if (sub === "anchor") showAnchorModal(args.slice(1).join(" "));
+                    else if (sub === "summary") runSummary(false);
+                    else openPanel();
+                }, [], "打开河岸凝视面板", true, true);
+            }
+        } catch (e) {}
     }
 
+    // ══════════════════════════════════════
+    // Boot
+    // ══════════════════════════════════════
     function boot() {
         injectMenuButton(); injectSettingsPanel();
         new MutationObserver(function () { injectMenuButton(); injectSettingsPanel(); }).observe(document.body, { childList: true, subtree: true });
         setInterval(injectMenuButton, 2000); registerSlashCommand();
         try { loadCurrentWorld(); } catch (e) {}
-                        try {
+
+        // 确保启动时：如果没有世界则自动创建
+        if (!currentWorldId && getCurrentChatId()) {
+            ensureWorldExists(); saveCurrentWorld();
+        }
+
+        try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
                 var countFn = function () {
                     if (!isEnabled()) return;
+                    // 如果中途丢失了世界 ID，尝试重载或补建
+                    if (!currentWorldId) {
+                        loadCurrentWorld();
+                        if (!currentWorldId && getCurrentChatId()) { ensureWorldExists(); saveCurrentWorld(); }
+                    }
                     state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + 1;
                     if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
                         state.turnsSinceAnchor = 0;
                         toast("⚙ 自律模式触发，开始自动切片…");
                         runSummary(true);
                     }
+                    // 平时也隐藏旧消息，只保留最近 N 条
+                    applyRecentVisibility();
                     saveCurrentWorld();
+                    updateInjectionWithVector();
                 };
                 ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, countFn);
+
                 if (ctx1.eventTypes.MESSAGE_SWIPED) {
                     ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SWIPED, function (msgIdx) {
                         if (!isEnabled() || !state.lastAutoSummaryRange) return;
@@ -1117,6 +1014,7 @@
                         var idx = typeof msgIdx === "number" ? msgIdx : (msgIdx && msgIdx.id != null ? msgIdx.id : -1);
                         if (idx < 0) { var st2 = getST(); idx = st2 && st2.chat ? st2.chat.length - 1 : -1; }
                         if (idx >= range.floorFrom && idx <= range.floorTo) {
+                            // 删除关联的最后一条自动总结
                             if (state.summaries && state.summaries.length > range.summaryIdx) {
                                 state.summaries.splice(range.summaryIdx, 1);
                                 if (currentWorldId && worlds[currentWorldId]) {
@@ -1130,9 +1028,18 @@
                         }
                     });
                 }
+
                 ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
                     var p = document.getElementById("tlg-panel"); if (p) p.remove();
-                    canvas = null; ctx = null; document.body.style.overflow = "";
+                    canvas = null; ctx = null; document.body.style.overflow = ""; panelBuilt = false;
+                    // 切换聊天时，自动加载世界，没有则创建
+                    setTimeout(function () {
+                        loadCurrentWorld();
+                        if (!currentWorldId && getCurrentChatId()) {
+                            ensureWorldExists(); saveCurrentWorld();
+                        }
+                        updateInjectionWithVector();
+                    }, 500);
                 });
             }
         } catch (e) {}
