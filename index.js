@@ -5,13 +5,14 @@
     var EXT_NAME = "RiparianGaze";
     var METADATA_KEY = "tlg_data";
 
-    var state = {
+        var state = {
         nodes: [],
         currentNodeId: null,
         selectedNodeId: null,
         summaries: [],
         turnsSinceAnchor: 0,
-        _lastChatLen: 0
+        _lastChatLen: 0,
+        lastAutoSummaryRange: null  // { floorFrom, floorTo, summaryIdx }
     };
 
         var globalApi = {
@@ -266,7 +267,7 @@
                 if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
             }
         }
-        if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
+                if (typeof st.saveChat === "function") st.saveChat();
     }
 
     function createAnchor(name, brief) {
@@ -611,10 +612,11 @@
         var latest = state.summaries[state.summaries.length - 1];
         var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
         var latestFloor = (latest.floorFrom >= 0 && latest.floorTo >= 0) ? ' · #' + latest.floorFrom + '~#' + latest.floorTo : '';
-        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
+        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>'+ '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;">📋 补全历史切片</button>';
         document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { openSummaryHistory(); });
-    }
-
+        var catchupBtn = document.getElementById("tlg-summary-catchup-btn"); if (catchupBtn) catchupBtn.addEventListener("click", function () { runCatchupSummary(); });
+}
+        
     function openSummaryHistory() {
         var old = document.getElementById("tlg-summary-fullscreen"); if (old) old.remove();
         var container = document.createElement("div"); container.id = "tlg-summary-fullscreen";
@@ -733,7 +735,7 @@
     //   runSummaryWithMessages(messages) —— 传入已收集好的消息数组，用于跳转前自动总结
     //   runSummary(auto)                 —— 手动/自动触发，取当前可见消息
     // ══════════════════════════════════════
-        function _doSummaryRequest(messagesArray, auto, sourceLabel) {
+    function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
         if (!apiUrl) { toast("切片失败：未设置 API 地址。"); return; }
@@ -779,6 +781,14 @@
                     timestamp: Date.now(), text: text, nodeId: state.currentNodeId,
                     floorFrom: firstFloor, floorTo: lastFloor
                 });
+                                // 记录最后一次自动总结的范围（用于 swipe 重写）
+                if (auto && firstFloor >= 0 && lastFloor >= 0) {
+                    state.lastAutoSummaryRange = {
+                        floorFrom: firstFloor,
+                        floorTo: lastFloor,
+                        summaryIdx: worlds[lockedWorldId].summaries.length - 1
+                    };
+                }
                 var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
                 var trimmed = 0;
                 if (worlds[lockedWorldId].summaries.length > maxCount) {
@@ -797,10 +807,11 @@
                 }
             }
         }).catch(function (e) { toast("✗ " + label + "切片失败：" + e.message); })
-        .then(function () {
+                .then(function () {
             if (btn) btn.disabled = false;
             if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
-        });
+            if (typeof onDone === "function") onDone();
+               });
     }
 
     function runSummaryWithMessages(messagesArray) {
@@ -814,6 +825,55 @@
         var visible = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
         var recent = visible.slice(-count);
         _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
+    }
+    function runCatchupSummary() {
+        var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
+        ensureWorldExists();
+        var batchSize = globalApi.manualCount || 20;
+        var allMessages = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
+        if (!allMessages.length) { toast("没有可用消息。"); return; }
+
+        // 找出已被总结覆盖的最高楼层
+        var coveredUpTo = -1;
+        if (state.summaries && state.summaries.length) {
+            for (var i = 0; i < state.summaries.length; i++) {
+                var s = state.summaries[i];
+                if (typeof s.floorTo === "number" && s.floorTo > coveredUpTo) coveredUpTo = s.floorTo;
+            }
+        }
+
+        // 筛选未被覆盖的消息
+        var uncovered = [];
+        for (var j = 0; j < st.chat.length; j++) {
+            if (j <= coveredUpTo) continue;
+            if (st.chat[j]._tlg_hidden || st.chat[j].is_hidden) continue;
+            uncovered.push(st.chat[j]);
+        }
+        if (!uncovered.length) { toast("所有楼层已被覆盖，无需补全。"); return; }
+
+        // 分批执行
+        var batches = [];
+        for (var k = 0; k < uncovered.length; k += batchSize) {
+            batches.push(uncovered.slice(k, k + batchSize));
+        }
+
+        toast("📋 开始补全历史切片，共 " + batches.length + " 批…");
+        var sendBtn = document.getElementById("send_but");
+        if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
+        var btn = document.getElementById("tlg-summary-catchup-btn"); if (btn) btn.disabled = true;
+
+        var idx = 0;
+                function nextBatch() {
+            if (idx >= batches.length) {
+                toast("✓ 历史补全完成，共 " + batches.length + " 批。");
+                if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
+                if (btn) btn.disabled = false;
+                return;
+            }
+            var batch = batches[idx]; idx++;
+            _doSummaryRequest(batch, true, "补全 " + idx + "/" + batches.length, nextBatch);
+        }
+        nextBatch();
     }
 
     function fetchModelList() {
@@ -1036,7 +1096,7 @@
         new MutationObserver(function () { injectMenuButton(); injectSettingsPanel(); }).observe(document.body, { childList: true, subtree: true });
         setInterval(injectMenuButton, 2000); registerSlashCommand();
         try { loadCurrentWorld(); } catch (e) {}
-                try {
+                        try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
                 var countFn = function () {
@@ -1050,8 +1110,25 @@
                     saveCurrentWorld();
                 };
                 ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, countFn);
-                if (ctx1.eventTypes.MESSAGE_SENT) {
-                    ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SENT, countFn);
+                if (ctx1.eventTypes.MESSAGE_SWIPED) {
+                    ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SWIPED, function (msgIdx) {
+                        if (!isEnabled() || !state.lastAutoSummaryRange) return;
+                        var range = state.lastAutoSummaryRange;
+                        var idx = typeof msgIdx === "number" ? msgIdx : (msgIdx && msgIdx.id != null ? msgIdx.id : -1);
+                        if (idx < 0) { var st2 = getST(); idx = st2 && st2.chat ? st2.chat.length - 1 : -1; }
+                        if (idx >= range.floorFrom && idx <= range.floorTo) {
+                            if (state.summaries && state.summaries.length > range.summaryIdx) {
+                                state.summaries.splice(range.summaryIdx, 1);
+                                if (currentWorldId && worlds[currentWorldId]) {
+                                    worlds[currentWorldId].summaries = state.summaries;
+                                }
+                                saveWorlds();
+                            }
+                            state.lastAutoSummaryRange = null;
+                            state.turnsSinceAnchor = 0;
+                            toast("🔄 检测到重试，已撤销最近自动切片，将在下次达到阈值时重新切片。");
+                        }
+                    });
                 }
                 ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
                     var p = document.getElementById("tlg-panel"); if (p) p.remove();
