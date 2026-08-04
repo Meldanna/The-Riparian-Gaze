@@ -5,11 +5,12 @@
     var EXT_NAME = "RiparianGaze";
     var METADATA_KEY = "tlg_data";
 
-    var state = {
+        var state = {
         nodes: [],
         currentNodeId: null,
         selectedNodeId: null,
         summaries: [],
+        factUnits: [],
         turnsSinceAnchor: 0,
         _lastChatLen: 0,
         lastAutoSummaryRange: null
@@ -21,6 +22,9 @@
         rerankUrl: "", rerankKey: "", rerankModel: "", rerankModelList: [],
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
+        digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
+        digestPrompt: "", digestAutoMode: true, factUnitsMaxCount: 500,
+        rerankUseLLM: false, rerankLLMPrompt: "",
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         compressPrompt: "以下是若干条历史因果档案，请将其浓缩合并为一条，保留所有关键事件、状态变化和悬置因果线，删除重复和次要细节。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
@@ -154,8 +158,9 @@
                 state.nodes.unshift({ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] });
                 if (!state.nodes.find(function(n) { return n.id === w.currentNodeId; })) w.currentNodeId = rootId;
             }
-            state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
+                        state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
             state.selectedNodeId = null;
+            state.factUnits = w.factUnits || [];
         } else {
             currentWorldId = null; resetState();
         }
@@ -1182,10 +1187,34 @@
     function runSummary(auto) {
         var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
         ensureWorldExists();
-        var count = auto ? (globalApi.autoInterval || 10) : (globalApi.manualCount || 20);
-        var visible = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
-        var recent = visible.slice(-count);
-        _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
+        if (auto) {
+            // 自动模式：按楼层精确取"上次总结之后"的未覆盖消息
+            var interval = globalApi.autoInterval || 10;
+            var coveredUpTo = -1;
+            if (state.summaries && state.summaries.length) {
+                for (var i = 0; i < state.summaries.length; i++) {
+                    var s = state.summaries[i];
+                    if (typeof s.floorTo === "number" && s.floorTo > coveredUpTo) coveredUpTo = s.floorTo;
+                }
+            }
+            // 收集未覆盖楼层（跳过#0开场白，不过滤隐藏标记）
+            var uncovered = [];
+            for (var j = 0; j < st.chat.length; j++) {
+                if (j === 0) continue;
+                if (j <= coveredUpTo) continue;
+                uncovered.push(st.chat[j]);
+            }
+            // 必须满一个完整间隔才总结
+            if (uncovered.length < interval) return;
+            // 只取刚好一个间隔的量
+            var batch = uncovered.slice(0, interval);
+            _doSummaryRequest(batch, true, "自动");
+        } else {
+            // 手动模式：取最近 N 条（不过滤隐藏）
+            var count = globalApi.manualCount || 20;
+            var recent = st.chat.slice(-count);
+            _doSummaryRequest(recent, false, "手动");
+        }
     }
 
     function runCatchupSummary() {
@@ -1233,6 +1262,189 @@
             _doSummaryRequest(batch, true, "补全 " + idx + "/" + batches.length, nextBatch);
         }
         nextBatch();
+    }
+
+        // ══════════════════════════════════════
+    // 摘要API：每回合事实单元抽取
+    // ══════════════════════════════════════
+    function getTurnTime() {
+        try {
+            var snap = window.__tlg_mvu_snapshot || {};
+            var t = snap.time || snap.game_time || snap.current_time || snap.date || snap.gameTime || "";
+            return String(t).trim();
+        } catch (e) { return ""; }
+    }
+
+    function parseFactUnits(rawText) {
+        var lines = rawText.split("\n");
+        var units = [];
+        var st = getST();
+        var turnIdx = (st && st.chat) ? Math.max(0, st.chat.length - 1) : 0;
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line || line.indexOf("[T]:") === -1) continue;
+            var unit = { raw: line, T: "", L: "", E: "", I: "", A: "", C: "", timestamp: Date.now(), turnIdx: turnIdx };
+            var fields = line.split(" | ");
+            for (var j = 0; j < fields.length; j++) {
+                var f = fields[j].trim();
+                if (f.indexOf("[T]:") === 0) unit.T = f.slice(4).trim();
+                else if (f.indexOf("[L]:") === 0) unit.L = f.slice(4).trim();
+                else if (f.indexOf("[E]:") === 0) unit.E = f.slice(4).trim();
+                else if (f.indexOf("[I]:") === 0) unit.I = f.slice(4).trim();
+                else if (f.indexOf("[A]:") === 0) unit.A = f.slice(4).trim();
+                else if (f.indexOf("[C]:") === 0) unit.C = f.slice(4).trim();
+            }
+            if (unit.T || unit.L || unit.E || unit.A) units.push(unit);
+        }
+        return units;
+    }
+
+    function extractGeoFromUnits(units) {
+        var geoEntries = [];
+        for (var i = 0; i < units.length; i++) {
+            var L = units[i].L;
+            if (!L || L === "NULL") continue;
+            var parts = L.split("→");
+            for (var p = 0; p < parts.length; p++) {
+                var loc = parts[p].trim();
+                if (loc && loc !== "NULL") {
+                    geoEntries.push({
+                        path: loc,
+                        turnIdx: units[i].turnIdx,
+                        timestamp: units[i].timestamp,
+                        time: units[i].T !== "NULL" ? units[i].T : ""
+                    });
+                }
+            }
+        }
+        return geoEntries;
+    }
+
+    function extractNPCFromUnits(units) {
+        var npcEntries = [];
+        for (var i = 0; i < units.length; i++) {
+            var E = units[i].E;
+            if (!E || E === "NULL") continue;
+            var chars = E.split("；");
+            for (var c = 0; c < chars.length; c++) {
+                var charStr = chars[c].trim();
+                if (!charStr) continue;
+                // 格式：姓名（身份标签）：变化描述
+                var nameMatch = charStr.match(/^(.+?)（(.+?)）：(.+)$/);
+                if (nameMatch) {
+                    npcEntries.push({
+                        name: nameMatch[1].trim(),
+                        role: nameMatch[2].trim(),
+                        change: nameMatch[3].trim(),
+                        location: (units[i].L && units[i].L !== "NULL") ? units[i].L : "",
+                        time: (units[i].T && units[i].T !== "NULL") ? units[i].T : "",
+                        turnIdx: units[i].turnIdx,
+                        timestamp: units[i].timestamp
+                    });
+                }
+            }
+        }
+        return npcEntries;
+    }
+
+    function runDigestRequest(retryCount) {
+        retryCount = retryCount || 0;
+        var MAX_RETRIES = 3;
+        var digestUrl = (globalApi.digestUrl || "").trim();
+        var digestKey = (globalApi.digestKey || "").trim();
+        var digestModel = (globalApi.digestModel || "").trim();
+        var digestPrompt = (globalApi.digestPrompt || "").trim();
+        if (!digestUrl || !digestPrompt) return;
+        var st = getST(); if (!st || !st.chat || !st.chat.length) return;
+        ensureWorldExists();
+
+        // 取最新一条AI回复作为本回合内容
+        var lastMsg = null;
+        for (var i = st.chat.length - 1; i >= 0; i--) {
+            if (!st.chat[i].is_user && st.chat[i].mes) { lastMsg = st.chat[i]; break; }
+        }
+        if (!lastMsg) return;
+
+        var turnTime = getTurnTime();
+        var context = (lastMsg.mes || "").trim();
+        if (!context) return;
+
+        var prompt = digestPrompt
+            .replace(/\{\{turn_time\}\}/g, turnTime || "（未知）")
+            .replace(/\{\{context\}\}/g, context);
+
+        var lockedWorldId = currentWorldId;
+
+        fetch(buildEndpoint(digestUrl, "/chat/completions"), {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, digestKey ? { Authorization: "Bearer " + digestKey } : {}),
+            body: JSON.stringify({
+                model: digestModel || undefined,
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 4096
+            })
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        }).then(function (data) {
+            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            if (!text.trim()) { toast("⚠ 事实单元返回为空。"); return; }
+            var units = parseFactUnits(text);
+            if (!units.length) { toast("⚠ 事实单元解析失败，未识别到有效行。"); return; }
+            if (lockedWorldId && worlds[lockedWorldId]) {
+                if (!worlds[lockedWorldId].factUnits) worlds[lockedWorldId].factUnits = [];
+                if (!worlds[lockedWorldId].geoBuffer) worlds[lockedWorldId].geoBuffer = [];
+                if (!worlds[lockedWorldId].npcBuffer) worlds[lockedWorldId].npcBuffer = [];
+                worlds[lockedWorldId].factUnits = worlds[lockedWorldId].factUnits.concat(units);
+                var maxCount = globalApi.factUnitsMaxCount || 500;
+                if (worlds[lockedWorldId].factUnits.length > maxCount) {
+                    worlds[lockedWorldId].factUnits = worlds[lockedWorldId].factUnits.slice(-maxCount);
+                }
+                var geoEntries = extractGeoFromUnits(units);
+                var npcEntries = extractNPCFromUnits(units);
+                worlds[lockedWorldId].geoBuffer = worlds[lockedWorldId].geoBuffer.concat(geoEntries);
+                worlds[lockedWorldId].npcBuffer = worlds[lockedWorldId].npcBuffer.concat(npcEntries);
+                if (worlds[lockedWorldId].geoBuffer.length > 2000) worlds[lockedWorldId].geoBuffer = worlds[lockedWorldId].geoBuffer.slice(-2000);
+                if (worlds[lockedWorldId].npcBuffer.length > 2000) worlds[lockedWorldId].npcBuffer = worlds[lockedWorldId].npcBuffer.slice(-2000);
+                if (lockedWorldId === currentWorldId) {
+                    state.factUnits = worlds[lockedWorldId].factUnits;
+                }
+                saveWorlds();
+                toast("✓ 事实单元 +" + units.length + " | 地理 +" + geoEntries.length + " | NPC +" + npcEntries.length);
+            }
+        }).catch(function (e) {
+            console.error("[TLG] Digest:", e);
+            if (retryCount < MAX_RETRIES) {
+                var delay = (retryCount + 1) * 3000;
+                toast("⚠ 事实抽取失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
+                setTimeout(function () { runDigestRequest(retryCount + 1); }, delay);
+            } else {
+                toast("✗ 事实抽取最终失败: " + e.message);
+            }
+        });
+    }
+
+    function fetchDigestModelList() {
+        var apiUrl = (globalApi.digestUrl || "").trim(), apiKey = (globalApi.digestKey || "").trim();
+        if (!apiUrl) { toast("请先设置摘要API地址。"); return; }
+        var btn = document.getElementById("tlg-fetch-digest-models"); if (btn) btn.disabled = true;
+        toast("检测摘要模型…");
+        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
+        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (data) {
+            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
+            globalApi.digestModelList = models; saveGlobalApi(); populateDigestModelSelect();
+            toast("已识别 " + models.length + " 个摘要模型。");
+        }).catch(function (e) { toast("通信失败: " + e.message); })
+        .then(function () { if (btn) btn.disabled = false; });
+    }
+
+    function populateDigestModelSelect() {
+        var sel = document.getElementById("tlg-digest-model-select"); if (!sel) return;
+        sel.innerHTML = '<option value="">-- 选择摘要核心 --</option>' +
+            (globalApi.digestModelList || []).map(function (m) {
+                return '<option value="' + escHtml(m) + '"' + (m === globalApi.digestModel ? " selected" : "") + '>' + escHtml(m) + '</option>';
+            }).join("");
     }
 
     function fetchModelList() {
@@ -1410,7 +1622,10 @@
             '<label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
-            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:8px" />' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">使用LLM深度精排（支持!CONFLICT !HISTORICAL标记）</span><div class="tlg-toggle ' + (s.rerankUseLLM ? "on" : "") + '" id="tlg-rerank-use-llm"></div></div>' +
+            '<label class="tlg-label">LLM精排提示词（仅开启LLM精排时生效）</label>' +
+            '<textarea class="tlg-textarea" id="tlg-rerank-llm-prompt" style="min-height:140px;font-size:11px;">' + escHtml(s.rerankLLMPrompt || "") + '</textarea></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div>' +
             '<label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:10px" />' +
@@ -1429,6 +1644,16 @@
             '<div><label class="tlg-label">注入深度（0=最底部贴近最新消息）</label><input class="tlg-input" id="tlg-vec-inject-depth" type="number" min="0" max="50" value="' + (s.vectorInjectDepth || 0) + '" style="width:70px" /></div>' +
             '<div><label class="tlg-label">最大注入字符（防撑爆上下文）</label><input class="tlg-input" id="tlg-vec-max-chars" type="number" min="200" max="20000" step="100" value="' + (s.vectorMaxChars || 4000) + '" style="width:80px" /></div>' +
             '</div></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取）</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元[T][L][E][I][A][C]，供向量检索。与总结功能并行，各自独立，互不替代。</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
+            '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">摘要核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-digest-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-digest-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-digest-model" value="' + escHtml(s.digestModel || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">事实单元上限（超出后删最旧，建议500~2000）</label><input class="tlg-input" id="tlg-fact-units-max" type="number" min="50" max="5000" value="' + (s.factUnitsMaxCount || 500) + '" style="width:80px;margin-bottom:8px" />' +
+            '<label class="tlg-label">摘要提示词（{{turn_time}}=游戏内时间 {{context}}=本回合正文）</label>' +
+            '<textarea class="tlg-textarea" id="tlg-digest-prompt" style="min-height:200px;font-size:11px;">' + escHtml(s.digestPrompt || "") + '</textarea></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">重排引擎（Rerank，可选）</div>' +
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量初筛结果进行语义精排。留空则跳过重排，直接从 Top-K 取 Top-N。</div>' +
             '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
@@ -1466,7 +1691,7 @@
         else if (name === "summary") refreshSummary();
         else if (name === "vault") refreshVault();
         else if (name === "worlds") refreshWorlds();
-        else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); populateRerankModelSelect(); }
+        else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); populateRerankModelSelect(); populateDigestModelSelect(); }
     }
 
     function bindPanelEvents(panel) {
@@ -1513,6 +1738,14 @@
             globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim();
             globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim();
             globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
+            globalApi.digestUrl = document.getElementById("tlg-digest-url").value.trim();
+            globalApi.digestKey = document.getElementById("tlg-digest-key").value.trim();
+            globalApi.digestModel = document.getElementById("tlg-digest-model").value.trim() || document.getElementById("tlg-digest-model-select").value;
+            globalApi.digestPrompt = document.getElementById("tlg-digest-prompt").value;
+            globalApi.digestAutoMode = document.getElementById("tlg-digest-auto-toggle").classList.contains("on");
+            globalApi.factUnitsMaxCount = Math.max(50, parseInt(document.getElementById("tlg-fact-units-max").value) || 500);
+            globalApi.rerankUseLLM = document.getElementById("tlg-rerank-use-llm").classList.contains("on");
+            globalApi.rerankLLMPrompt = document.getElementById("tlg-rerank-llm-prompt").value;
             saveGlobalApi(); toast("引擎设置已锚定。");
         });
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
@@ -1536,6 +1769,30 @@
         });
         document.getElementById("tlg-fetch-rerank-models").addEventListener("click", function () { flashBtn(this); globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim(); globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim(); saveGlobalApi(); fetchRerankModelList(); });
         document.getElementById("tlg-rerank-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-rerank-model").value = this.value; });
+                document.getElementById("tlg-digest-auto-toggle").addEventListener("click", function () {
+            globalApi.digestAutoMode = !globalApi.digestAutoMode;
+            this.classList.toggle("on", globalApi.digestAutoMode); saveGlobalApi();
+        });
+        document.getElementById("tlg-test-digest-api").addEventListener("click", function () {
+            var url = document.getElementById("tlg-digest-url").value.trim(), key = document.getElementById("tlg-digest-key").value.trim();
+            if (!url) { toast("摘要地址为空。"); return; } flashBtn(this); toast("发送摘要探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} })
+            .then(function (res) { toast(res.ok ? "✓ 摘要节点联通。" : ("✗ 阻断: " + res.status)); })
+            .catch(function (e) { toast("✗ " + e.message); });
+        });
+        document.getElementById("tlg-fetch-digest-models").addEventListener("click", function () {
+            flashBtn(this);
+            globalApi.digestUrl = document.getElementById("tlg-digest-url").value.trim();
+            globalApi.digestKey = document.getElementById("tlg-digest-key").value.trim();
+            saveGlobalApi(); fetchDigestModelList();
+        });
+        document.getElementById("tlg-digest-model-select").addEventListener("change", function () {
+            if (this.value) document.getElementById("tlg-digest-model").value = this.value;
+        });
+        document.getElementById("tlg-rerank-use-llm").addEventListener("click", function () {
+            globalApi.rerankUseLLM = !globalApi.rerankUseLLM;
+            this.classList.toggle("on", globalApi.rerankUseLLM); saveGlobalApi();
+        });
         initCanvasEvents();
     }
 
@@ -1632,7 +1889,7 @@
         try { loadCurrentWorld(); } catch (e) {}
         if (!currentWorldId && getCurrentChatId()) { ensureWorldExists(); if (!state.nodes.length) resetState(); saveCurrentWorld(); }
 
-        try {
+                try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
                 ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
@@ -1641,7 +1898,10 @@
                     var st2 = getST();
                     if (st2 && st2.chat) {
                         var curLen = st2.chat.length;
-                        var prevLen = state._lastChatLen || 0;
+                        if (!state._lastChatLen || state._lastChatLen <= 0) {
+                            state._lastChatLen = curLen;
+                        }
+                        var prevLen = state._lastChatLen;
                         if (curLen > prevLen) {
                             state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + (curLen - prevLen);
                             state._lastChatLen = curLen;
@@ -1649,13 +1909,30 @@
                     }
                     saveTurnsCounter();
                     if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
-                        state.turnsSinceAnchor = 0;
-                        saveTurnsCounter();
-                        toast("⚙ 自律模式触发（" + (globalApi.autoInterval || 10) + " 楼）");
-                        runSummary(true);
+                        var interval = globalApi.autoInterval || 10;
+                        var coveredUpTo = -1;
+                        if (state.summaries && state.summaries.length) {
+                            for (var si = 0; si < state.summaries.length; si++) {
+                                var sm = state.summaries[si];
+                                if (typeof sm.floorTo === "number" && sm.floorTo > coveredUpTo) coveredUpTo = sm.floorTo;
+                            }
+                        }
+                        var actualUncovered = 0;
+                        for (var ui = 1; ui < st2.chat.length; ui++) {
+                            if (ui > coveredUpTo) actualUncovered++;
+                        }
+                        if (actualUncovered >= interval) {
+                            state.turnsSinceAnchor = 0;
+                            saveTurnsCounter();
+                            toast("⚙ 自律模式触发（未覆盖 " + actualUncovered + " 楼）");
+                            runSummary(true);
+                        }
                     }
                     applyRecentVisibility();
                     saveCurrentWorld();
+                    if (globalApi.digestAutoMode !== false) {
+                        setTimeout(function () { runDigestRequest(); }, 1000);
+                    }
                 });
 
                 if (ctx1.eventTypes.MESSAGE_SENT) {
@@ -1664,7 +1941,10 @@
                         var st3 = getST();
                         if (st3 && st3.chat) {
                             var curLen = st3.chat.length;
-                            var prevLen = state._lastChatLen || 0;
+                            if (!state._lastChatLen || state._lastChatLen <= 0) {
+                                state._lastChatLen = curLen;
+                            }
+                            var prevLen = state._lastChatLen;
                             if (curLen > prevLen) {
                                 state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + (curLen - prevLen);
                                 state._lastChatLen = curLen;
@@ -1714,7 +1994,6 @@
         } catch (e) {}
         console.log("[TLG] 河岸凝视 v3.6 已上线");
     }
-
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
     else { setTimeout(boot, 1000); }
