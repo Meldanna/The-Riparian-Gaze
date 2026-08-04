@@ -267,29 +267,42 @@
         } catch (e) {}
     }
 
-    function applyVisibility(targetNodeId) {
+    function applyJumpVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
-        var pathIds = getPathToRoot(targetNodeId); var pathNodes = pathIds.map(findNode).filter(Boolean);
-        var visible = {}, i, m, node, next, start, end;
-        for (i = 0; i < pathNodes.length; i++) {
-            node = pathNodes[i]; next = pathNodes[i + 1] || null; start = node.msgIdx; end = next ? next.msgIdx - 1 : node.msgIdx;
-            for (m = start; m <= end; m++) visible[m] = true;
-        }
-        var target = findNode(targetNodeId); var lastN = Math.max(0, globalApi.lastNMessages || 5);
-        var endIdx = target ? target.msgIdx : st.chat.length - 1;
-        for (m = Math.max(0, endIdx - lastN + 1); m <= endIdx; m++) visible[m] = true;
-        for (i = 0; i < st.chat.length; i++) {
-            if (visible[i]) {
-                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+        var target = findNode(targetNodeId); if (!target) return;
+        var lastN = Math.max(1, globalApi.lastNMessages || 5);
+        var endIdx = target.msgIdx;
+        var visStart = Math.max(0, endIdx - lastN + 1);
+        for (var i = 0; i < st.chat.length; i++) {
+            if (i >= visStart && i <= endIdx) {
+                delete st.chat[i].is_system;
+                delete st.chat[i]._tlg_hidden;
             } else {
-                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+                st.chat[i].is_system = true;
+                st.chat[i]._tlg_hidden = true;
             }
         }
-        // reloadCurrentChat 让酒馆重新渲染，AI生成时正确过滤隐藏消息
-        if (typeof st.reloadCurrentChat === "function") {
-            st.reloadCurrentChat();
+        state._jumpedToIdx = endIdx;
+        state._chatLenAtJump = st.chat.length;
+        // 持久化 + 重载
+        try {
+            var result = st.saveChat();
+            if (result && typeof result.then === "function") {
+                result.then(function () {
+                    if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
+                });
+            } else {
+                setTimeout(function () {
+                    if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
+                }, 300);
+            }
+        } catch (e) {
+            setTimeout(function () {
+                if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
+            }, 300);
         }
     }
+
         function applyJumpVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
         var target = findNode(targetNodeId); if (!target) return;
@@ -362,14 +375,28 @@
     function createAnchorAtFloor(name, brief, floorIdx) {
         var st = getST(); if (!st) return; ensureWorldExists();
         var msgIdx = Math.max(0, Math.min(floorIdx, (st.chat ? st.chat.length - 1 : 0)));
-        var parentId = state.currentNodeId; var newId = generateId();
+        // 找最合适的父节点：msgIdx 最接近且 <= 目标楼层的已有节点
+        var bestParent = null;
+        var bestDist = Infinity;
+        for (var i = 0; i < state.nodes.length; i++) {
+            var n = state.nodes[i];
+            if (n.msgIdx <= msgIdx) {
+                var dist = msgIdx - n.msgIdx;
+                if (dist < bestDist) { bestDist = dist; bestParent = n; }
+            }
+        }
+        // 如果没找到（不该发生），用根节点
+        if (!bestParent) bestParent = state.nodes.find(function(n) { return !n.parentId; });
+        var parentId = bestParent ? bestParent.id : state.currentNodeId;
+        var newId = generateId();
         var newNode = { id: newId, name: name || ("节点@#" + msgIdx), brief: brief || "", parentId: parentId, msgIdx: msgIdx, statData: getMVUStatData(), timestamp: Date.now(), children: [] };
         var parent = findNode(parentId);
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
-        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
+        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId;
         state._jumpedToIdx = null; state._chatLenAtJump = null;
-        saveTurnsCounter();
+        saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
+
 
     function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
