@@ -24,7 +24,7 @@
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         compressPrompt: "以下是若干条历史因果档案，请将其浓缩合并为一条，保留所有关键事件、状态变化和悬置因果线，删除重复和次要细节。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
-        pathSummaryPrompt: "以下是一条命运路径上的节点描述和相关因果档案，请为这条路径生成一段简短的剧情摘要（200字以内），概括主要事件走向和当前状态。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
+        pathSummaryPrompt: "以下是一条命运路径上的节点描述和相关因果档案。请为这条路径生成一段完整的剧情摘要，概括主要事件走向、关键转折和当前状态。长度200~400字，确保信息充分。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
         summaryFilterMode: true,
         autoMode: false, autoInterval: 10, lastNMessages: 5,
         jumpSummary: true,
@@ -585,18 +585,45 @@
         var pathIds = getPathToRoot(nodeId);
         var pathNodes = pathIds.map(findNode).filter(Boolean);
         var contextParts = [];
+        // 1. 节点信息
         pathNodes.forEach(function(n) {
-            if (n.brief) contextParts.push("节点【" + n.name + "】：" + n.brief);
+            var info = "节点【" + n.name + "】(#" + n.msgIdx + ")";
+            if (n.brief) info += "：" + n.brief;
+            contextParts.push(info);
         });
-        var relSummaries = state.summaries.filter(function(s) { return !s.nodeId || pathIds.indexOf(s.nodeId) !== -1; }).slice(-5);
-        if (relSummaries.length) contextParts.push("相关档案：\n" + relSummaries.map(function(s){ return s.text; }).join("\n---\n"));
+        // 2. 相关档案（多取一些）
+        var relSummaries = state.summaries.filter(function(s) { return !s.nodeId || pathIds.indexOf(s.nodeId) !== -1; }).slice(-10);
+        if (relSummaries.length) {
+            contextParts.push("路径相关因果档案：\n" + relSummaries.map(function(s){ return s.text; }).join("\n---\n"));
+        }
+        // 3. 如果上下文仍然太少，补充最近的聊天消息
+        if (contextParts.join("").length < 100) {
+            var st = getST();
+            if (st && st.chat) {
+                var targetNode = findNode(nodeId);
+                var endIdx = targetNode ? targetNode.msgIdx : st.chat.length - 1;
+                var startIdx = Math.max(0, endIdx - 10);
+                var chatSlice = st.chat.slice(startIdx, endIdx + 1).filter(function(m) { return m.mes; });
+                if (chatSlice.length) {
+                    contextParts.push("该节点附近的对话：\n" + chatSlice.map(function(m) { return (m.name || m.role || "?") + ": " + (m.mes || "").slice(0, 150); }).join("\n"));
+                }
+            }
+        }
         var context = contextParts.join("\n\n");
+        if (!context.trim()) { toast("路径上下文为空，无法生成。"); callback(""); return; }
         var prompt = (globalApi.pathSummaryPrompt || "").replace("{{context}}", context);
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
-            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 512 })
-        }).then(function(r){ return r.json(); }).then(function(data){
+            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
+        }).then(function(r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        }).then(function(data){
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            text = text.trim();
+            if (text.length < 20) {
+                toast("⚠ AI 生成内容过短（" + text.length + "字），可能上下文不足。");
+            }
             callback(text);
         }).catch(function(e){ toast("生成失败：" + e.message); callback(""); });
     }
