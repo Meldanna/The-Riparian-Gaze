@@ -18,7 +18,9 @@
     var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
-        rerankUrl: "", rerankKey: "", rerankModel: "", rerankModelList: [], vectorTopK: 8, rerankTopN: 3,
+        rerankUrl: "", rerankKey: "", rerankModel: "", rerankModelList: [],
+        vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
+        vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         compressPrompt: "以下是若干条历史因果档案，请将其浓缩合并为一条，保留所有关键事件、状态变化和悬置因果线，删除重复和次要细节。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
@@ -961,99 +963,131 @@
         var injectionText = (template && template.indexOf("{{context}}") !== -1) ? template.replace("{{context}}", content) : "以下为已记录的近期因果档案：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
         st.setExtensionPrompt(EXT_NAME, injectionText, 1, 2);
     }
-    function updateInjectionWithVector() {
+        function updateInjectionWithVector() {
         var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
         if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 2); return; }
         var vecUrl = (globalApi.vectorUrl || "").trim(), vecKey = (globalApi.vectorKey || "").trim(), vecModel = (globalApi.vectorModel || "").trim();
         if (!vecUrl || !vecModel) { updateInjection(); return; }
-        var chat = (st.chat || []).slice(-5).map(function (m) { return (m.mes || "").slice(0, 200); }).join(" ");
+        var queryWindow = Math.max(1, globalApi.vectorQueryWindow || 5);
+        var chat = (st.chat || []).slice(-queryWindow).map(function (m) { return (m.mes || "").slice(0, 300); }).join(" ");
+        if (!chat.trim()) { updateInjection(); return; }
         _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, 0);
     }
 
     function _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, retryCount) {
         var MAX_RETRIES = 3;
-        var topK = globalApi.vectorTopK || 8;
+        var topK = Math.max(1, globalApi.vectorTopK || 8);
+        var chunkLen = Math.max(100, globalApi.vectorChunkLen || 600);
+        var threshold = globalApi.vectorThreshold || 0;
         fetch(buildEndpoint(vecUrl, "/embeddings"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
             body: JSON.stringify({ model: vecModel, input: chat })
-        }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
-            var queryVec = data.data && data.data[0] && data.data[0].embedding; if (!queryVec) { updateInjection(); return; }
+        }).then(function (r) { if (!r.ok) throw new Error("嵌入请求 HTTP " + r.status); return r.json(); }).then(function (data) {
+            var queryVec = data.data && data.data[0] && data.data[0].embedding;
+            if (!queryVec) { updateInjection(); return; }
             var pool;
             if (globalApi.summaryFilterMode !== false) {
                 var path = getPathToRoot(state.currentNodeId);
                 pool = state.summaries.filter(function (s) { return !s.nodeId || path.indexOf(s.nodeId) !== -1; });
             } else { pool = state.summaries.slice(); }
-            var texts = pool.map(function (s) { return s.text; });
+            if (!pool.length) { updateInjection(); return; }
+            var texts = pool.map(function (s) { return s.text.slice(0, chunkLen); });
             return fetch(buildEndpoint(vecUrl, "/embeddings"), {
                 method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
                 body: JSON.stringify({ model: vecModel, input: texts })
-            }).then(function (r2) { if (!r2.ok) throw new Error("HTTP " + r2.status); return r2.json(); }).then(function (data2) {
+            }).then(function (r2) { if (!r2.ok) throw new Error("档案嵌入 HTTP " + r2.status); return r2.json(); }).then(function (data2) {
                 var embeddings = (data2.data || []).map(function (d) { return d.embedding; });
-                var scored = embeddings.map(function (emb, idx) {
-                    var dot = 0, na = 0, nb = 0;
+                var scored = [];
+                for (var i = 0; i < embeddings.length; i++) {
+                    if (!embeddings[i]) continue;
+                    var emb = embeddings[i], dot = 0, na = 0, nb = 0;
                     for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
-                    return { idx: idx, score: dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8) };
-                }).sort(function (a, b) { return b.score - a.score; });
-                var top = scored.slice(0, topK);
-                // 重排（如果配置了）
+                    var sim = dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8);
+                    scored.push({ idx: i, score: sim, text: pool[i].text });
+                }
+                scored.sort(function (a, b) { return b.score - a.score; });
+                // 相似度阈值过滤
+                if (threshold > 0) {
+                    scored = scored.filter(function (s) { return s.score >= threshold; });
+                }
+                if (!scored.length) { updateInjection(); return; }
+                var candidates = scored.slice(0, topK);
+                // 是否重排
                 var rerankUrl = (globalApi.rerankUrl || "").trim();
-                var rerankKey = (globalApi.rerankKey || "").trim();
                 var rerankModel = (globalApi.rerankModel || "").trim();
-                if (rerankUrl && rerankModel && top.length > 1) {
-                    var documents = top.map(function (t) { return pool[t.idx].text; });
-                    _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, chat, documents, pool, top, 0);
+                if (rerankUrl && rerankModel && candidates.length > 1) {
+                    _rerankAndInject(st, rerankUrl, (globalApi.rerankKey || "").trim(), rerankModel, chat, candidates, 0);
                 } else {
-                    var topN = globalApi.rerankTopN || 3;
-                    var content = top.slice(0, topN).map(function (t) { return pool[t.idx].text; }).join("\n\n---\n\n");
-                    _doInject(st, content);
+                    _finalInject(st, candidates);
                 }
             });
         }).catch(function (e) {
+            console.error("[TLG] Vector:", e);
             if (retryCount < MAX_RETRIES) {
-                var delay = (retryCount + 1) * 1500;
-                toast("⚠ 向量检索失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")…");
+                var delay = (retryCount + 1) * 2000;
+                toast("⚠ 向量检索失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
                 setTimeout(function () { _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, retryCount + 1); }, delay);
             } else {
-                toast("⚠ 向量检索最终失败，使用直接注入。");
+                toast("⚠ 向量检索最终失败，回退直接注入。");
                 updateInjection();
             }
         });
     }
 
-    function _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, documents, pool, top, retryCount) {
+    function _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, candidates, retryCount) {
         var MAX_RETRIES = 2;
-        var topN = globalApi.rerankTopN || 3;
+        var topN = Math.max(1, globalApi.rerankTopN || 3);
+        var rerankThreshold = globalApi.rerankThreshold || 0;
+        var documents = candidates.map(function (c) { return c.text; });
         fetch(buildEndpoint(rerankUrl, "/rerank"), {
             method: "POST",
             headers: Object.assign({ "Content-Type": "application/json" }, rerankKey ? { Authorization: "Bearer " + rerankKey } : {}),
             body: JSON.stringify({ model: rerankModel, query: query, documents: documents, top_n: topN })
-        }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
+        }).then(function (r) { if (!r.ok) throw new Error("重排 HTTP " + r.status); return r.json(); }).then(function (data) {
             var results = data.results || [];
             if (results.length) {
-                results.sort(function (a, b) { return b.relevance_score - a.relevance_score; });
-                var content = results.slice(0, topN).map(function (item) { return documents[item.index]; }).join("\n\n---\n\n");
-                _doInject(st, content);
+                results.sort(function (a, b) { return (b.relevance_score || 0) - (a.relevance_score || 0); });
+                // 重排阈值过滤
+                if (rerankThreshold > 0) {
+                    results = results.filter(function (r) { return (r.relevance_score || 0) >= rerankThreshold; });
+                }
+                var reranked = results.slice(0, topN).map(function (item) { return candidates[item.index]; });
+                _finalInject(st, reranked.length ? reranked : candidates.slice(0, topN));
             } else {
-                var content2 = documents.slice(0, topN).join("\n\n---\n\n");
-                _doInject(st, content2);
+                _finalInject(st, candidates.slice(0, topN));
             }
         }).catch(function (e) {
+            console.error("[TLG] Rerank:", e);
             if (retryCount < MAX_RETRIES) {
                 var delay = (retryCount + 1) * 1500;
-                toast("⚠ 重排失败，" + (delay / 1000) + "秒后重试…");
-                setTimeout(function () { _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, documents, pool, top, retryCount + 1); }, delay);
+                toast("⚠ 重排失败，" + (delay / 1000) + "秒后重试");
+                setTimeout(function () { _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, candidates, retryCount + 1); }, delay);
             } else {
                 toast("⚠ 重排最终失败，使用向量原始排序。");
-                var content3 = documents.slice(0, topN).join("\n\n---\n\n");
-                _doInject(st, content3);
+                _finalInject(st, candidates);
             }
         });
     }
 
-    function _doInject(st, content) {
+    function _finalInject(st, items) {
+        var topN = Math.max(1, globalApi.rerankTopN || 3);
+        var maxChars = Math.max(200, globalApi.vectorMaxChars || 4000);
+        var final = items.slice(0, topN);
+        var parts = [], usedChars = 0;
+        for (var i = 0; i < final.length; i++) {
+            var text = final[i].text || "";
+            if (usedChars + text.length > maxChars) {
+                var remain = maxChars - usedChars;
+                if (remain > 50) parts.push(text.slice(0, remain) + "…");
+                break;
+            }
+            parts.push(text); usedChars += text.length;
+        }
+        var content = parts.join("\n\n---\n\n");
         var template = globalApi.vectorPrompt || "";
-        var injectionText = template.indexOf("{{context}}") !== -1 ? template.replace("{{context}}", content) : "以下为与当前情境相关的因果档案：\n\n" + content;
-        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 2);
+        var injectionText = (template && template.indexOf("{{context}}") !== -1) ? template.replace("{{context}}", content) : "以下为与当前情境相关的因果档案：\n\n" + content;
+        var depth = Math.max(0, globalApi.vectorInjectDepth || 0);
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, depth);
     }
 
     function buildEndpoint(base, path) {
@@ -1355,15 +1389,25 @@
             '<label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
             '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">联想提示词</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea>' +
-            '<label class="tlg-label">召回数量 (Top-K)</label><input class="tlg-input" id="tlg-vec-topk" type="number" min="1" max="50" value="' + (s.vectorTopK || 8) + '" style="width:80px;margin-bottom:10px" /></div>' +
+            '<label class="tlg-label">联想提示词（{{context}} = 最终注入内容）</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">召回参数</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:10px;">控制 向量检索 → 重排 → 注入 完整流程的所有参数。</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;">' +
+            '<div><label class="tlg-label">查询窗口（最近N条消息→生成查询向量）</label><input class="tlg-input" id="tlg-vec-query-window" type="number" min="1" max="20" value="' + (s.vectorQueryWindow || 5) + '" style="width:70px" /></div>' +
+            '<div><label class="tlg-label">档案截断（每条嵌入取前N字符）</label><input class="tlg-input" id="tlg-vec-chunk-len" type="number" min="100" max="2000" step="50" value="' + (s.vectorChunkLen || 600) + '" style="width:80px" /></div>' +
+            '<div><label class="tlg-label">初筛召回 Top-K（向量排序后保留候选数）</label><input class="tlg-input" id="tlg-vec-topk" type="number" min="1" max="50" value="' + (s.vectorTopK || 8) + '" style="width:70px" /></div>' +
+            '<div><label class="tlg-label">相似度阈值（低于此值丢弃，0=全保留）</label><input class="tlg-input" id="tlg-vec-threshold" type="number" min="0" max="1" step="0.05" value="' + (s.vectorThreshold || 0) + '" style="width:80px" /></div>' +
+            '<div><label class="tlg-label">最终注入 Top-N（重排后取前N条）</label><input class="tlg-input" id="tlg-rerank-topn" type="number" min="1" max="20" value="' + (s.rerankTopN || 3) + '" style="width:70px" /></div>' +
+            '<div><label class="tlg-label">重排相关度阈值（0=不过滤）</label><input class="tlg-input" id="tlg-rerank-threshold" type="number" min="0" max="1" step="0.05" value="' + (s.rerankThreshold || 0) + '" style="width:80px" /></div>' +
+            '<div><label class="tlg-label">注入深度（0=最底部贴近最新消息）</label><input class="tlg-input" id="tlg-vec-inject-depth" type="number" min="0" max="50" value="' + (s.vectorInjectDepth || 0) + '" style="width:70px" /></div>' +
+            '<div><label class="tlg-label">最大注入字符（防撑爆上下文）</label><input class="tlg-input" id="tlg-vec-max-chars" type="number" min="200" max="20000" step="100" value="' + (s.vectorMaxChars || 4000) + '" style="width:80px" /></div>' +
+            '</div></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">重排引擎（Rerank，可选）</div>' +
-            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量召回结果二次排序，提升相关性。留空则跳过重排。</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量初筛结果进行语义精排。留空则跳过重排，直接从 Top-K 取 Top-N。</div>' +
             '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">重排密钥</label><input class="tlg-input" id="tlg-rerank-key" type="password" value="' + escHtml(s.rerankKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">重排核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-rerank-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-rerank-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
-            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">重排后保留数量 (Top-N)</label><input class="tlg-input" id="tlg-rerank-topn" type="number" min="1" max="20" value="' + (s.rerankTopN || 3) + '" style="width:80px" /></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" /></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">提示词配置</div>' +
             '<label class="tlg-label">浓缩指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-compress-prompt" style="min-height:80px">' + escHtml(s.compressPrompt || "") + '</textarea>' +
             '<label class="tlg-label">路径摘要指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px">' + escHtml(s.pathSummaryPrompt || "") + '</textarea></div>' +
@@ -1432,10 +1476,16 @@
             globalApi.compressPrompt = document.getElementById("tlg-compress-prompt").value;
             globalApi.pathSummaryPrompt = document.getElementById("tlg-path-summary-prompt").value;
             globalApi.vectorTopK = Math.max(1, parseInt(document.getElementById("tlg-vec-topk").value) || 8);
+            globalApi.vectorThreshold = Math.max(0, parseFloat(document.getElementById("tlg-vec-threshold").value) || 0);
+            globalApi.vectorQueryWindow = Math.max(1, parseInt(document.getElementById("tlg-vec-query-window").value) || 5);
+            globalApi.vectorChunkLen = Math.max(100, parseInt(document.getElementById("tlg-vec-chunk-len").value) || 600);
+            globalApi.vectorInjectDepth = Math.max(0, parseInt(document.getElementById("tlg-vec-inject-depth").value) || 0);
+            globalApi.vectorMaxChars = Math.max(200, parseInt(document.getElementById("tlg-vec-max-chars").value) || 4000);
+            globalApi.rerankTopN = Math.max(1, parseInt(document.getElementById("tlg-rerank-topn").value) || 3);
+            globalApi.rerankThreshold = Math.max(0, parseFloat(document.getElementById("tlg-rerank-threshold").value) || 0);
             globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim();
             globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim();
             globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
-            globalApi.rerankTopN = Math.max(1, parseInt(document.getElementById("tlg-rerank-topn").value) || 3);
             saveGlobalApi(); toast("引擎设置已锚定。");
         });
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
