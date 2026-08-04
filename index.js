@@ -276,41 +276,37 @@
         } catch (e) {}
     }
 
-function applyJumpVisibility(targetNodeId) {
-    var st = getST(); if (!st || !st.chat) return;
-    var target = findNode(targetNodeId); if (!target) return;
-    var lastN = Math.max(1, globalApi.lastNMessages || 5);
-    var endIdx = target.msgIdx;
-    var visStart = Math.max(0, endIdx - lastN + 1);
+    function applyJumpVisibility(targetNodeId) {
+        var st = getST(); if (!st || !st.chat) return;
+        var target = findNode(targetNodeId); if (!target) return;
+        var lastN = Math.max(1, globalApi.lastNMessages || 5);
+        var endIdx = target.msgIdx;
+        var visStart = Math.max(0, endIdx - lastN + 1);
 
-    for (var i = 0; i < st.chat.length; i++) {
-        var shouldShow = (i >= visStart && i <= endIdx);
-        if (shouldShow) {
-            delete st.chat[i].is_system;
-            delete st.chat[i]._tlg_hidden;
-        } else {
-            st.chat[i].is_system = true;
-            st.chat[i]._tlg_hidden = true;
+        for (var i = 0; i < st.chat.length; i++) {
+            if (i >= visStart && i <= endIdx) {
+                delete st.chat[i].is_system;
+                delete st.chat[i]._tlg_hidden;
+            } else {
+                st.chat[i].is_system = true;
+                st.chat[i]._tlg_hidden = true;
+            }
         }
-        // 只刷新这一条消息的DOM，不要整体reload
-        if (typeof st.updateMessageBlock === "function") {
-            try { st.updateMessageBlock(i, st.chat[i]); } catch (e) {}
+
+        state._jumpedToIdx = endIdx;
+        state._chatLenAtJump = st.chat.length;
+
+        // 写进 chat_metadata（注意是下划线），重启后可恢复
+        if (st.chat_metadata) {
+            st.chat_metadata._tlg_jumpedToIdx = endIdx;
+            st.chat_metadata._tlg_chatLenAtJump = st.chat.length;
         }
+
+        // 只保存，不 reload
+        if (typeof st.saveChat === "function") st.saveChat();
+        if (typeof st.saveMetadata === "function") st.saveMetadata();
+        else if (typeof window.saveMetadataDebounced === "function") window.saveMetadataDebounced();
     }
-
-    state._jumpedToIdx = endIdx;
-    state._chatLenAtJump = st.chat.length;
-
-    // 跳转状态同步写进chatMetadata，重启/切聊天后可恢复（见第3段代码）
-    if (st.chatMetadata) {
-        st.chatMetadata._tlg_jumpedToIdx = endIdx;
-        st.chatMetadata._tlg_chatLenAtJump = st.chat.length;
-    }
-
-    // 只保存，绝对不要调用 reloadCurrentChat()
-    if (typeof st.saveChat === "function") st.saveChat();
-    if (typeof st.saveMetadata === "function") st.saveMetadata();
-}
     
     function applyRecentVisibility() {
         var st = getST(); if (!st || !st.chat || !st.chat.length) return;
