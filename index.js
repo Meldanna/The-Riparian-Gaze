@@ -23,7 +23,7 @@
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
-        digestPrompt: "", digestAutoMode: true, factUnitsMaxCount: 500,
+        digestPrompt: "", queryRefinePrompt: "", digestAutoMode: true, factUnitsMaxCount: 500,
         rerankUseLLM: false, rerankLLMPrompt: "",
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
@@ -1489,7 +1489,7 @@
             globalApi.vectorModelList = models; saveGlobalApi(); populateVectorModelSelect(); toast("已识别 " + models.length + " 个向量模型。");
         }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
     }
-        function fetchRerankModelList() {
+    function fetchRerankModelList() {
         var apiUrl = (globalApi.rerankUrl || "").trim(), apiKey = (globalApi.rerankKey || "").trim();
         if (!apiUrl) { toast("请先设置重排 API 地址。"); return; }
         var btn = document.getElementById("tlg-fetch-rerank-models"); if (btn) btn.disabled = true; toast("检测重排模型…");
@@ -1618,25 +1618,39 @@
             '<div id="tlg-worlds-list"></div></div></div>' +
             // 引擎核心
             '<div class="tlg-view" data-view="engine"><div class="tlg-scroll-panel">' +
-            '<div class="tlg-section"><div class="tlg-section-title">主解析引擎</div>' +
+            // ─── 主解析引擎 ───
+            '<div class="tlg-section"><div class="tlg-section-title">主解析引擎（总结 / 路径 / 压缩）</div>' +
             '<label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
-            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:8px" />' +
-            '<div class="tlg-row"><span class="tlg-label" style="margin:0">使用LLM深度精排（支持!CONFLICT !HISTORICAL标记）</span><div class="tlg-toggle ' + (s.rerankUseLLM ? "on" : "") + '" id="tlg-rerank-use-llm"></div></div>' +
-            '<label class="tlg-label">LLM精排提示词（仅开启LLM精排时生效）</label>' +
-            '<textarea class="tlg-textarea" id="tlg-rerank-llm-prompt" style="min-height:140px;font-size:11px;">' + escHtml(s.rerankLLMPrompt || "") + '</textarea></div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" style="margin-bottom:10px" />' +
+            '<label class="tlg-label">总结提示词（{{context}} = 对话内容，注入AI+玩家可见）</label><textarea class="tlg-textarea" id="tlg-engine-summary-prompt" style="min-height:140px;font-size:11px;">' + escHtml(s.summaryPrompt || "") + '</textarea>' +
+            '<label class="tlg-label">浓缩指令（{{context}} = 多条档案内容）</label><textarea class="tlg-textarea" id="tlg-compress-prompt" style="min-height:80px;font-size:11px;">' + escHtml(s.compressPrompt || "") + '</textarea>' +
+            '<label class="tlg-label">路径摘要指令（{{context}} = 路径信息）</label><textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px;font-size:11px;">' + escHtml(s.pathSummaryPrompt || "") + '</textarea></div>' +
+            // ─── 摘要引擎 ───
+            '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取 → 向量化）</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中。与总结并行独立，互不替代。[E]字段供样本库，[L]字段供地理库。</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
+            '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">摘要核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-digest-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-digest-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-digest-model" value="' + escHtml(s.digestModel || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">事实单元上限（超出删最旧，建议500~2000）</label><input class="tlg-input" id="tlg-fact-units-max" type="number" min="50" max="5000" value="' + (s.factUnitsMaxCount || 500) + '" style="width:100px;margin-bottom:10px" />' +
+            '<label class="tlg-label">摘要提示词（{{turn_time}} = 游戏内时间，{{context}} = 本回合正文）</label><textarea class="tlg-textarea" id="tlg-digest-prompt" style="min-height:200px;font-size:11px;">' + escHtml(s.digestPrompt || "") + '</textarea>' +
+            '<label class="tlg-label">检索构造器提示词（{{context}} = 最近对话，生成前调用，输出关键词供向量检索）</label><textarea class="tlg-textarea" id="tlg-query-refine-prompt" style="min-height:140px;font-size:11px;">' + escHtml(s.queryRefinePrompt || "") + '</textarea></div>' +
+            // ─── 联想网络（向量） ───
+            '<div class="tlg-section"><div class="tlg-section-title">联想网络（向量嵌入 / 检索）</div>' +
             '<label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
             '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">联想提示词（{{context}} = 最终注入内容）</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea></div>' +
+            '<label class="tlg-label">注入模板（{{context}} = 最终检索命中内容）</label><textarea class="tlg-textarea" id="tlg-vec-prompt" style="min-height:80px;font-size:11px;">' + escHtml(s.vectorPrompt || "") + '</textarea></div>' +
+            // ─── 召回参数 ───
             '<div class="tlg-section"><div class="tlg-section-title">召回参数</div>' +
-            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:10px;">控制 向量检索 → 重排 → 注入 完整流程的所有参数。</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:10px;">控制 向量检索 → 重排 → 注入 完整流程。</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;">' +
-            '<div><label class="tlg-label">查询窗口（最近N条消息→生成查询向量）</label><input class="tlg-input" id="tlg-vec-query-window" type="number" min="1" max="20" value="' + (s.vectorQueryWindow || 5) + '" style="width:70px" /></div>' +
-            '<div><label class="tlg-label">档案截断（每条嵌入取前N字符）</label><input class="tlg-input" id="tlg-vec-chunk-len" type="number" min="100" max="2000" step="50" value="' + (s.vectorChunkLen || 600) + '" style="width:80px" /></div>' +
+            '<div><label class="tlg-label">查询窗口（最近N条消息生成查询向量）</label><input class="tlg-input" id="tlg-vec-query-window" type="number" min="1" max="20" value="' + (s.vectorQueryWindow || 5) + '" style="width:70px" /></div>' +
+            '<div><label class="tlg-label">档案截断（嵌入时每条取前N字符）</label><input class="tlg-input" id="tlg-vec-chunk-len" type="number" min="100" max="2000" step="50" value="' + (s.vectorChunkLen || 600) + '" style="width:80px" /></div>' +
             '<div><label class="tlg-label">初筛召回 Top-K（向量排序后保留候选数）</label><input class="tlg-input" id="tlg-vec-topk" type="number" min="1" max="50" value="' + (s.vectorTopK || 8) + '" style="width:70px" /></div>' +
             '<div><label class="tlg-label">相似度阈值（低于此值丢弃，0=全保留）</label><input class="tlg-input" id="tlg-vec-threshold" type="number" min="0" max="1" step="0.05" value="' + (s.vectorThreshold || 0) + '" style="width:80px" /></div>' +
             '<div><label class="tlg-label">最终注入 Top-N（重排后取前N条）</label><input class="tlg-input" id="tlg-rerank-topn" type="number" min="1" max="20" value="' + (s.rerankTopN || 3) + '" style="width:70px" /></div>' +
@@ -1644,25 +1658,16 @@
             '<div><label class="tlg-label">注入深度（0=最底部贴近最新消息）</label><input class="tlg-input" id="tlg-vec-inject-depth" type="number" min="0" max="50" value="' + (s.vectorInjectDepth || 0) + '" style="width:70px" /></div>' +
             '<div><label class="tlg-label">最大注入字符（防撑爆上下文）</label><input class="tlg-input" id="tlg-vec-max-chars" type="number" min="200" max="20000" step="100" value="' + (s.vectorMaxChars || 4000) + '" style="width:80px" /></div>' +
             '</div></div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取）</div>' +
-            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元[T][L][E][I][A][C]，供向量检索。与总结功能并行，各自独立，互不替代。</div>' +
-            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
-            '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
-            '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">摘要核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-digest-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-digest-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
-            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-digest-model" value="' + escHtml(s.digestModel || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">事实单元上限（超出后删最旧，建议500~2000）</label><input class="tlg-input" id="tlg-fact-units-max" type="number" min="50" max="5000" value="' + (s.factUnitsMaxCount || 500) + '" style="width:80px;margin-bottom:8px" />' +
-            '<label class="tlg-label">摘要提示词（{{turn_time}}=游戏内时间 {{context}}=本回合正文）</label>' +
-            '<textarea class="tlg-textarea" id="tlg-digest-prompt" style="min-height:200px;font-size:11px;">' + escHtml(s.digestPrompt || "") + '</textarea></div>' +
+            // ─── 重排引擎 ───
             '<div class="tlg-section"><div class="tlg-section-title">重排引擎（Rerank，可选）</div>' +
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量初筛结果进行语义精排。留空则跳过重排，直接从 Top-K 取 Top-N。</div>' +
             '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">重排密钥</label><input class="tlg-input" id="tlg-rerank-key" type="password" value="' + escHtml(s.rerankKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">重排核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-rerank-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-rerank-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
-            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" /></div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">提示词配置</div>' +
-            '<label class="tlg-label">浓缩指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-compress-prompt" style="min-height:80px">' + escHtml(s.compressPrompt || "") + '</textarea>' +
-            '<label class="tlg-label">路径摘要指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px">' + escHtml(s.pathSummaryPrompt || "") + '</textarea></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:10px" />' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">使用LLM深度精排（支持 !CONFLICT !HISTORICAL 标记）</span><div class="tlg-toggle ' + (s.rerankUseLLM ? "on" : "") + '" id="tlg-rerank-use-llm"></div></div>' +
+            '<label class="tlg-label">LLM精排提示词（仅开启上方开关时生效，{{current_context_summary}} {{current_time}} {{current_place}} {{candidate_fragments}}）</label><textarea class="tlg-textarea" id="tlg-rerank-llm-prompt" style="min-height:140px;font-size:11px;">' + escHtml(s.rerankLLMPrompt || "") + '</textarea></div>' +
+            // ─── 保存按钮 ───
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">锁定核心配置</button>' +
             '</div></div></div>';
 
@@ -1704,7 +1709,7 @@
         document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
         document.getElementById("tlg-worlds-import").addEventListener("click", importWorld);
         document.getElementById("tlg-worlds-create").addEventListener("click", createNewWorldManual);
-
+        
         document.getElementById("tlg-auto-toggle").addEventListener("click", function () { globalApi.autoMode = !globalApi.autoMode; this.classList.toggle("on", globalApi.autoMode); saveGlobalApi(); });
         document.getElementById("tlg-auto-interval").addEventListener("change", function () { globalApi.autoInterval = Math.max(1, parseInt(this.value, 10) || 10); saveGlobalApi(); });
         document.getElementById("tlg-jump-summary-toggle").addEventListener("click", function () { globalApi.jumpSummary = !globalApi.jumpSummary; this.classList.toggle("on", globalApi.jumpSummary); saveGlobalApi(); });
@@ -1718,36 +1723,57 @@
 
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
             flashBtn(this);
+            // 主API
             globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim();
             globalApi.apiKey = document.getElementById("tlg-api-key").value.trim();
-            globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
-            globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
-            globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value;
-            globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
             globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value;
+            globalApi.summaryPrompt = document.getElementById("tlg-engine-summary-prompt").value;
             globalApi.compressPrompt = document.getElementById("tlg-compress-prompt").value;
             globalApi.pathSummaryPrompt = document.getElementById("tlg-path-summary-prompt").value;
-            globalApi.vectorTopK = Math.max(1, parseInt(document.getElementById("tlg-vec-topk").value) || 8);
-            globalApi.vectorThreshold = Math.max(0, parseFloat(document.getElementById("tlg-vec-threshold").value) || 0);
-            globalApi.vectorQueryWindow = Math.max(1, parseInt(document.getElementById("tlg-vec-query-window").value) || 5);
-            globalApi.vectorChunkLen = Math.max(100, parseInt(document.getElementById("tlg-vec-chunk-len").value) || 600);
-            globalApi.vectorInjectDepth = Math.max(0, parseInt(document.getElementById("tlg-vec-inject-depth").value) || 0);
-            globalApi.vectorMaxChars = Math.max(200, parseInt(document.getElementById("tlg-vec-max-chars").value) || 4000);
-            globalApi.rerankTopN = Math.max(1, parseInt(document.getElementById("tlg-rerank-topn").value) || 3);
-            globalApi.rerankThreshold = Math.max(0, parseFloat(document.getElementById("tlg-rerank-threshold").value) || 0);
-            globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim();
-            globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim();
-            globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
+                    // 总结提示词双向同步（因果档案页 ↔ 引擎页）
+        var summaryPromptSync = function (sourceId) {
+            return function () {
+                globalApi.summaryPrompt = document.getElementById(sourceId).value;
+                var other = sourceId === "tlg-summary-prompt" ? "tlg-engine-summary-prompt" : "tlg-summary-prompt";
+                var otherEl = document.getElementById(other);
+                if (otherEl) otherEl.value = globalApi.summaryPrompt;
+            };
+        };
+        var sp1 = document.getElementById("tlg-summary-prompt");
+        var sp2 = document.getElementById("tlg-engine-summary-prompt");
+        if (sp1) sp1.addEventListener("change", summaryPromptSync("tlg-summary-prompt"));
+        if (sp2) sp2.addEventListener("change", summaryPromptSync("tlg-engine-summary-prompt"));
+            // 摘要API
             globalApi.digestUrl = document.getElementById("tlg-digest-url").value.trim();
             globalApi.digestKey = document.getElementById("tlg-digest-key").value.trim();
             globalApi.digestModel = document.getElementById("tlg-digest-model").value.trim() || document.getElementById("tlg-digest-model-select").value;
             globalApi.digestPrompt = document.getElementById("tlg-digest-prompt").value;
+            globalApi.queryRefinePrompt = document.getElementById("tlg-query-refine-prompt").value;
             globalApi.digestAutoMode = document.getElementById("tlg-digest-auto-toggle").classList.contains("on");
             globalApi.factUnitsMaxCount = Math.max(50, parseInt(document.getElementById("tlg-fact-units-max").value) || 500);
+            // 向量API
+            globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
+            globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
+            globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value;
+            globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
+            // 召回参数
+            globalApi.vectorQueryWindow = Math.max(1, parseInt(document.getElementById("tlg-vec-query-window").value) || 5);
+            globalApi.vectorChunkLen = Math.max(100, parseInt(document.getElementById("tlg-vec-chunk-len").value) || 600);
+            globalApi.vectorTopK = Math.max(1, parseInt(document.getElementById("tlg-vec-topk").value) || 8);
+            globalApi.vectorThreshold = Math.max(0, parseFloat(document.getElementById("tlg-vec-threshold").value) || 0);
+            globalApi.rerankTopN = Math.max(1, parseInt(document.getElementById("tlg-rerank-topn").value) || 3);
+            globalApi.rerankThreshold = Math.max(0, parseFloat(document.getElementById("tlg-rerank-threshold").value) || 0);
+            globalApi.vectorInjectDepth = Math.max(0, parseInt(document.getElementById("tlg-vec-inject-depth").value) || 0);
+            globalApi.vectorMaxChars = Math.max(200, parseInt(document.getElementById("tlg-vec-max-chars").value) || 4000);
+            // 重排API
+            globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim();
+            globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim();
+            globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
             globalApi.rerankUseLLM = document.getElementById("tlg-rerank-use-llm").classList.contains("on");
             globalApi.rerankLLMPrompt = document.getElementById("tlg-rerank-llm-prompt").value;
             saveGlobalApi(); toast("引擎设置已锚定。");
         });
+
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
         document.getElementById("tlg-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-model-manual").value = this.value; });
         document.getElementById("tlg-vec-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-vec-model").value = this.value; });
