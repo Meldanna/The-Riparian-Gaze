@@ -286,6 +286,26 @@
             st.reloadCurrentChat();
         }
     }
+    function applyJumpVisibility(targetNodeId) {
+        // 跳转专用可见性：只显示目标节点 msgIdx 往前 lastN 条，其余全隐藏
+        var st = getST(); if (!st || !st.chat) return;
+        var target = findNode(targetNodeId); if (!target) return;
+        var lastN = Math.max(1, globalApi.lastNMessages || 5);
+        var endIdx = target.msgIdx;
+        // 可见范围：[endIdx - lastN + 1, endIdx]
+        var visStart = Math.max(0, endIdx - lastN + 1);
+        for (var i = 0; i < st.chat.length; i++) {
+            if (i >= visStart && i <= endIdx) {
+                // 可见
+                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+            } else {
+                // 隐藏
+                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+            }
+        }
+        if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
+    }
+
     function applyRecentVisibility() {
         var st = getST(); if (!st || !st.chat || !st.chat.length) return;
         var lastN = Math.max(1, globalApi.lastNMessages || 5);
@@ -321,51 +341,45 @@
         saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
 
-    function jumpToNode(nodeId) {
+        function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
         var st = getST();
-        var preJumpMessages = null;
+
+        // ── 跳转前自动总结：不受间隔约束，全部未覆盖楼层都总结 ──
         var apiUrl = (globalApi.apiUrl || "").trim();
         if (apiUrl && globalApi.jumpSummary && st && st.chat) {
-            var coveredUpTo = -1;
-            if (state.summaries && state.summaries.length) {
-                for (var si = 0; si < state.summaries.length; si++) {
-                    var sm = state.summaries[si];
-                    if (typeof sm.floorTo === "number" && sm.floorTo > coveredUpTo) coveredUpTo = sm.floorTo;
-                }
-            }
-            // 不过滤隐藏标记，只看楼层是否已被总结覆盖
-            var uncoveredVisible = [];
-            for (var mi = 0; mi < st.chat.length; mi++) {
-                if (mi === 0) continue;
+            var coveredUpTo = _getCoveredUpTo();
+            var uncovered = [];
+            for (var mi = 1; mi < st.chat.length; mi++) {
                 if (mi <= coveredUpTo) continue;
-                uncoveredVisible.push(st.chat[mi]);
+                uncovered.push(st.chat[mi]);
             }
-            var interval = globalApi.autoInterval || 10;
-            if (uncoveredVisible.length >= interval) {
-                var fullCount = Math.floor(uncoveredVisible.length / interval) * interval;
-                preJumpMessages = uncoveredVisible.slice(0, fullCount);
+            // 有未覆盖楼层就全部总结（按间隔分批，但不要求满一批）
+            if (uncovered.length > 0) {
+                var batchSize = globalApi.autoInterval || 10;
+                var jumpBatches = [];
+                for (var jb = 0; jb < uncovered.length; jb += batchSize) {
+                    jumpBatches.push(uncovered.slice(jb, jb + batchSize));
+                }
+                var jbIdx = 0;
+                function nextJumpBatch() {
+                    if (jbIdx >= jumpBatches.length) return;
+                    var batch = jumpBatches[jbIdx]; jbIdx++;
+                    _doSummaryRequest(batch, true, "跳转前 " + jbIdx + "/" + jumpBatches.length, nextJumpBatch);
+                }
+                nextJumpBatch();
             }
         }
+
+        // ── 恢复 MVU 变量 ──
         if (node.statData != null) setMVUStatData(node.statData);
-        applyVisibility(nodeId);
+
+        // ── 跳转后隐藏：只显示目标节点前 lastN 条，其余全隐藏 ──
+        applyJumpVisibility(nodeId);
+
         state.currentNodeId = nodeId; state.turnsSinceAnchor = 0;
         saveTurnsCounter();
         saveCurrentWorld(); toast("↩ 已跳转至: " + node.name); renderCanvas(); refreshArchive(); closeBriefPanel();
-        if (preJumpMessages && preJumpMessages.length > 0) {
-            var interval2 = globalApi.autoInterval || 10;
-            var jumpBatches = [];
-            for (var jb = 0; jb < preJumpMessages.length; jb += interval2) {
-                jumpBatches.push(preJumpMessages.slice(jb, jb + interval2));
-            }
-            var jbIdx = 0;
-            function nextJumpBatch() {
-                if (jbIdx >= jumpBatches.length) return;
-                var batch = jumpBatches[jbIdx]; jbIdx++;
-                _doSummaryRequest(batch, true, "跳转前 " + jbIdx + "/" + jumpBatches.length, nextJumpBatch);
-            }
-            nextJumpBatch();
-        }
     }
 
     function showAnchorModal(prefillName) {
@@ -1186,38 +1200,42 @@
             if (typeof onDone === "function") onDone();
         });
     }
+    
+    function _getCoveredUpTo() {
+        var coveredUpTo = -1;
+        if (state.summaries && state.summaries.length) {
+            for (var i = 0; i < state.summaries.length; i++) {
+                var s = state.summaries[i];
+                if (typeof s.floorTo === "number" && s.floorTo > coveredUpTo) coveredUpTo = s.floorTo;
+            }
+        }
+        return coveredUpTo;
+    }
 
     function runSummaryWithMessages(messagesArray) { _doSummaryRequest(messagesArray, true, "跳转前"); }
 
     function runSummary(auto) {
         var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
         ensureWorldExists();
+        var interval = globalApi.autoInterval || 10;
+        var coveredUpTo = _getCoveredUpTo();
+        // 收集未覆盖楼层（跳过#0，不过滤隐藏标记）
+        var uncovered = [];
+        for (var j = 0; j < st.chat.length; j++) {
+            if (j === 0) continue;
+            if (j <= coveredUpTo) continue;
+            uncovered.push(st.chat[j]);
+        }
         if (auto) {
-            // 自动模式：按楼层精确取"上次总结之后"的未覆盖消息
-            var interval = globalApi.autoInterval || 10;
-            var coveredUpTo = -1;
-            if (state.summaries && state.summaries.length) {
-                for (var i = 0; i < state.summaries.length; i++) {
-                    var s = state.summaries[i];
-                    if (typeof s.floorTo === "number" && s.floorTo > coveredUpTo) coveredUpTo = s.floorTo;
-                }
-            }
-            // 收集未覆盖楼层（跳过#0开场白，不过滤隐藏标记）
-            var uncovered = [];
-            for (var j = 0; j < st.chat.length; j++) {
-                if (j === 0) continue;
-                if (j <= coveredUpTo) continue;
-                uncovered.push(st.chat[j]);
-            }
-            // 必须满一个完整间隔才总结
+            // 自动模式：必须满一个完整间隔
             if (uncovered.length < interval) return;
-            // 只取刚好一个间隔的量
             var batch = uncovered.slice(0, interval);
             _doSummaryRequest(batch, true, "自动");
         } else {
             // 手动模式：取最近 N 条（不过滤隐藏）
             var count = globalApi.manualCount || 20;
             var recent = st.chat.slice(-count);
+            if (recent.length && recent[0] === st.chat[0]) recent = recent.slice(1); // 跳过开场白
             _doSummaryRequest(recent, false, "手动");
         }
     }
@@ -1923,64 +1941,50 @@
                 try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
+                                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
                     if (!isEnabled()) return;
                     loadGlobalApi();
                     var st2 = getST();
                     if (st2 && st2.chat) {
                         var curLen = st2.chat.length;
-                        if (!state._lastChatLen || state._lastChatLen <= 0) {
-                            state._lastChatLen = curLen;
-                        }
-                        var prevLen = state._lastChatLen;
-                        if (curLen > prevLen) {
-                            state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + (curLen - prevLen);
+                        // 初始化同步
+                        if (!state._lastChatLen || state._lastChatLen <= 0) state._lastChatLen = curLen;
+                        // 如果 chat 变短了（删除/重试），同步但不加计数
+                        if (curLen < state._lastChatLen) { state._lastChatLen = curLen; }
+                        if (curLen > state._lastChatLen) {
                             state._lastChatLen = curLen;
                         }
                     }
-                    saveTurnsCounter();
-                    if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
+                    // 自动总结：基于 coveredUpTo 判断，不依赖 turnsSinceAnchor
+                    if (globalApi.autoMode && st2 && st2.chat) {
                         var interval = globalApi.autoInterval || 10;
-                        var coveredUpTo = -1;
-                        if (state.summaries && state.summaries.length) {
-                            for (var si = 0; si < state.summaries.length; si++) {
-                                var sm = state.summaries[si];
-                                if (typeof sm.floorTo === "number" && sm.floorTo > coveredUpTo) coveredUpTo = sm.floorTo;
-                            }
-                        }
-                        var actualUncovered = 0;
+                        var coveredUpTo = _getCoveredUpTo();
+                        var uncoveredCount = 0;
                         for (var ui = 1; ui < st2.chat.length; ui++) {
-                            if (ui > coveredUpTo) actualUncovered++;
+                            if (ui > coveredUpTo) uncoveredCount++;
                         }
-                        if (actualUncovered >= interval) {
-                            state.turnsSinceAnchor = 0;
-                            saveTurnsCounter();
-                            toast("⚙ 自律模式触发（未覆盖 " + actualUncovered + " 楼）");
+                        if (uncoveredCount >= interval) {
+                            toast("⚙ 自律模式触发（未覆盖 " + uncoveredCount + " 楼）");
                             runSummary(true);
                         }
                     }
                     applyRecentVisibility();
                     saveCurrentWorld();
+                    // 每回合异步事实抽取
                     if (globalApi.digestAutoMode !== false) {
                         setTimeout(function () { runDigestRequest(); }, 1000);
                     }
                 });
 
-                if (ctx1.eventTypes.MESSAGE_SENT) {
+                                if (ctx1.eventTypes.MESSAGE_SENT) {
                     ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SENT, function () {
                         if (!isEnabled()) return;
                         var st3 = getST();
                         if (st3 && st3.chat) {
                             var curLen = st3.chat.length;
-                            if (!state._lastChatLen || state._lastChatLen <= 0) {
-                                state._lastChatLen = curLen;
-                            }
-                            var prevLen = state._lastChatLen;
-                            if (curLen > prevLen) {
-                                state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + (curLen - prevLen);
-                                state._lastChatLen = curLen;
-                                saveTurnsCounter();
-                            }
+                            if (!state._lastChatLen || state._lastChatLen <= 0) state._lastChatLen = curLen;
+                            if (curLen < state._lastChatLen) state._lastChatLen = curLen;
+                            if (curLen > state._lastChatLen) state._lastChatLen = curLen;
                         }
                     });
                 }
