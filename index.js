@@ -5,26 +5,24 @@
     var EXT_NAME = "RiparianGaze";
     var METADATA_KEY = "tlg_data";
 
-        var state = {
+    var state = {
         nodes: [],
         currentNodeId: null,
         selectedNodeId: null,
         summaries: [],
         turnsSinceAnchor: 0,
-        _lastChatLen: 0,
-        lastAutoSummaryRange: null  // { floorFrom, floorTo, summaryIdx }
+        _lastChatLen: 0
     };
 
-        var globalApi = {
+    var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         summaryFilterMode: true,
         autoMode: false, autoInterval: 10, lastNMessages: 5,
-        jumpSummary: true,
-        summaryMaxCount: 100,
-        manualCount: 20
+        jumpSummary: true,      // 跳转前是否自动总结
+        summaryMaxCount: 100    // 每个世界最多保留的总结条数
     };
 
     var worlds = {};
@@ -136,12 +134,6 @@
         if (worldId && worlds[worldId]) {
             currentWorldId = worldId; var w = worlds[worldId];
             state.nodes = w.nodes || []; state.summaries = w.summaries || [];
-                        // 防护：如果节点列表为空或无根节点，自动重建
-        if (!state.nodes.length || !state.nodes.find(function(n) { return !n.parentId; })) {
-                var rootId = generateId();
-                state.nodes.unshift({ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] });
-                if (!state.nodes.find(function(n) { return n.id === w.currentNodeId; })) w.currentNodeId = rootId;
-            }
             state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
             state.selectedNodeId = null;
             state.turnsSinceAnchor = w.turnsSinceAnchor || 0;
@@ -208,13 +200,9 @@
     // MVU 变量读写 —— 使用 Mvu 框架接口
     // Mvu.getMvuVariable / Mvu.setMvuVariable 是该框架暴露的标准接口
     // ══════════════════════════════════════
-        function getMVUStatData() {
+    function getMVUStatData() {
         try {
-            // 最优先：渲染脚本桥接到主窗口的快照
-            if (window.__tlg_mvu_snapshot && Object.keys(window.__tlg_mvu_snapshot).length > 0) {
-                return JSON.parse(JSON.stringify(window.__tlg_mvu_snapshot));
-            }
-            // 次优先：Mvu 框架标准接口
+            // 优先：Mvu 框架标准接口
             if (typeof window.Mvu !== "undefined" && typeof window.Mvu.getMvuVariable === "function") {
                 var v = window.Mvu.getMvuVariable("stat_data");
                 if (v != null) return JSON.parse(JSON.stringify(v));
@@ -231,19 +219,25 @@
     function setMVUStatData(data) {
         if (data == null) return;
         try {
-            // 写回桥接变量
-            window.__tlg_mvu_snapshot = JSON.parse(JSON.stringify(data));
-            // 尝试通过 iframe 写回 MVU
-            var iframes = document.querySelectorAll("iframe");
-            for (var i = 0; i < iframes.length; i++) {
-                try {
-                    var win = iframes[i].contentWindow;
-                    if (win && typeof win.Mvu !== "undefined" && typeof win.Mvu.replaceCurrentMvuData === "function") {
-                        win.Mvu.replaceCurrentMvuData({ stat_data: JSON.parse(JSON.stringify(data)) });
-                        return;
-                    }
-                } catch (e) {}
+            // 优先：Mvu 框架标准接口
+            if (typeof window.Mvu !== "undefined" && typeof window.Mvu.setMvuVariable === "function") {
+                window.Mvu.setMvuVariable("stat_data", data);
+                return;
             }
+            // fallback：写回 chat_metadata
+            var st = getST(); if (!st || !st.chat_metadata) return;
+            var cm = st.chat_metadata;
+            if (cm.variables && typeof cm.variables === "object") {
+                cm.variables.stat_data = JSON.parse(JSON.stringify(data));
+            } else if (cm.script_variables && typeof cm.script_variables === "object") {
+                cm.script_variables.stat_data = JSON.parse(JSON.stringify(data));
+            } else if (cm.stat_data !== undefined) {
+                cm.stat_data = JSON.parse(JSON.stringify(data));
+            } else {
+                if (!cm.variables) cm.variables = {};
+                cm.variables.stat_data = JSON.parse(JSON.stringify(data));
+            }
+            if (typeof st.saveMetadata === "function") st.saveMetadata();
         } catch (e) {}
     }
 
@@ -258,32 +252,8 @@
         var target = findNode(targetNodeId); var lastN = Math.max(0, globalApi.lastNMessages || 5);
         var endIdx = target ? target.msgIdx : st.chat.length - 1;
         for (m = Math.max(0, endIdx - lastN + 1); m <= endIdx; m++) visible[m] = true;
-        // 用 is_system 隐藏（酒馆原生机制），加 _tlg_hidden 标记以便恢复
-        for (i = 0; i < st.chat.length; i++) {
-            if (visible[i]) {
-                // 恢复：只恢复我们标记过的
-                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
-            } else {
-                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
-            }
-        }
-                if (typeof st.saveChat === "function") st.saveChat();
-    }
-    function applyRecentVisibility() {
-        var st = getST(); if (!st || !st.chat || !st.chat.length) return;
-        var lastN = Math.max(1, globalApi.lastNMessages || 5);
-        var total = st.chat.length;
-        var changed = false;
-        for (var i = 0; i < total; i++) {
-            if (i >= total - lastN) {
-                // 可见：恢复我们标记过的
-                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; changed = true; }
-            } else {
-                // 隐藏
-                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; changed = true; }
-            }
-        }
-        if (changed && typeof st.saveChat === "function") st.saveChat();
+        for (i = 0; i < st.chat.length; i++) { if (visible[i]) delete st.chat[i].is_hidden; else st.chat[i].is_hidden = true; }
+        if (typeof st.saveChat === "function") st.saveChat();
     }
 
     function createAnchor(name, brief) {
@@ -295,17 +265,6 @@
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
         state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
         saveCurrentWorld(); toast("⚓ 已锚定: " + newNode.name); renderCanvas(); refreshArchive(); return newId;
-    }
-    
-    function createAnchorAtFloor(name, brief, floorIdx) {
-        var st = getST(); if (!st) return; ensureWorldExists();
-        var msgIdx = Math.max(0, Math.min(floorIdx, (st.chat ? st.chat.length - 1 : 0)));
-        var parentId = state.currentNodeId; var newId = generateId();
-        var newNode = { id: newId, name: name || ("节点@#" + msgIdx), brief: brief || "", parentId: parentId, msgIdx: msgIdx, statData: getMVUStatData(), timestamp: Date.now(), children: [] };
-        var parent = findNode(parentId);
-        if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
-        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId;
-        saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
 
     // ══════════════════════════════════════
@@ -320,7 +279,7 @@
         var preJumpMessages = null;
         var apiUrl = (globalApi.apiUrl || "").trim();
         if (apiUrl && globalApi.jumpSummary && st && st.chat && state.turnsSinceAnchor > 0) {
-            var visible = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
+            var visible = st.chat.filter(function (m) { return !m.is_hidden; });
             if (visible.length > 0) {
                 preJumpMessages = visible.slice(-(globalApi.autoInterval || 10));
             }
@@ -345,23 +304,11 @@
         var existing = document.getElementById("tlg-anchor-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-anchor-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
-                var st = getST(); var maxFloor = st && st.chat ? st.chat.length - 1 : 0;
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚓ 锚定因果刻度</div><div style="margin-bottom:12px"><label class="tlg-label">节点名称</label><input class="tlg-input" id="tlg-anc-name" placeholder="例：抉择之前…" value="' + escHtml(prefillName || "") + '" /></div><div style="margin-bottom:12px"><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea></div><div style="margin-bottom:12px"><label class="tlg-label">锚定楼层（留空=当前最新 #' + maxFloor + '）</label><input class="tlg-input" id="tlg-anc-floor" type="number" min="0" max="' + maxFloor + '" placeholder="' + maxFloor + '" /></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">确认锚定</button></div></div>';
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚓ 锚定因果刻度</div><div style="margin-bottom:12px"><label class="tlg-label">节点名称</label><input class="tlg-input" id="tlg-anc-name" placeholder="例：抉择之前…" value="' + escHtml(prefillName || "") + '" /></div><div><label class="tlg-label">简要描述</label><textarea class="tlg-textarea" id="tlg-anc-brief" placeholder="此时此刻的情况概述…"></textarea></div><div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-anc-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-anc-ok">确认锚定</button></div></div>';
         document.body.appendChild(backdrop);
         var nameInput = backdrop.querySelector("#tlg-anc-name");
         backdrop.querySelector("#tlg-anc-cancel").onclick = function () { backdrop.remove(); };
-                backdrop.querySelector("#tlg-anc-ok").onclick = function () {
-            var ancName = nameInput.value.trim() || ("节点 " + state.nodes.length);
-            var ancBrief = backdrop.querySelector("#tlg-anc-brief").value.trim();
-            var floorInput = backdrop.querySelector("#tlg-anc-floor");
-            var floorVal = floorInput ? floorInput.value.trim() : "";
-            if (floorVal !== "") {
-                createAnchorAtFloor(ancName, ancBrief, parseInt(floorVal, 10) || 0);
-            } else {
-                createAnchor(ancName, ancBrief);
-            }
-            backdrop.remove();
-        };
+        backdrop.querySelector("#tlg-anc-ok").onclick = function () { createAnchor(nameInput.value.trim() || ("节点 " + state.nodes.length), backdrop.querySelector("#tlg-anc-brief").value.trim()); backdrop.remove(); };
         backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
         setTimeout(function () { nameInput.focus(); }, 80);
     }
@@ -554,19 +501,12 @@
             btn.onclick = function () { showGraftModal(btn.dataset.nid); };
         });
     }
-        function deleteNode(nodeId) {
-        var node = findNode(nodeId); if (!node) return;
-        // 禁止删除根节点
-        if (!node.parentId) { toast("无法删除根节点（起源点）。"); return; }
-        var parent = findNode(node.parentId);
+    function deleteNode(nodeId) {
+        var node = findNode(nodeId); if (!node) return; var parent = findNode(node.parentId);
         if (parent) parent.children = parent.children.filter(function (id) { return id !== nodeId; });
         function rm(id) { var n = findNode(id); if (!n) return; n.children.slice().forEach(rm); state.nodes = state.nodes.filter(function (x) { return x.id !== id; }); }
-        rm(nodeId);
-        // 如果删掉的是当前节点，回退到父节点
-        if (state.currentNodeId === nodeId) state.currentNodeId = node.parentId;
-        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
+        rm(nodeId); saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除。");
     }
-
 
     // 嫁接：把 nodeId 从当前父节点摘下，挂到 newParentId 下
     function graftNode(nodeId, newParentId) {
@@ -627,12 +567,10 @@
         }
         var latest = state.summaries[state.summaries.length - 1];
         var preview = (latest.text || "").slice(0, 120); if (latest.text && latest.text.length > 120) preview += "…";
-        var latestFloor = (latest.floorFrom >= 0 && latest.floorTo >= 0) ? ' · #' + latest.floorFrom + '~#' + latest.floorTo : '';
-        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>'+ '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;">📋 补全历史切片</button>';
+        list.innerHTML = '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:10px;"><div style="font-size:11px;color:#7a7a8a;margin-bottom:6px">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + '</div><div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%">📜 查看完整档案记录 (' + state.summaries.length + ' 条)</button>';
         document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { openSummaryHistory(); });
-        var catchupBtn = document.getElementById("tlg-summary-catchup-btn"); if (catchupBtn) catchupBtn.addEventListener("click", function () { runCatchupSummary(); });
-}
-        
+    }
+
     function openSummaryHistory() {
         var old = document.getElementById("tlg-summary-fullscreen"); if (old) old.remove();
         var container = document.createElement("div"); container.id = "tlg-summary-fullscreen";
@@ -658,10 +596,9 @@
         if (!items.length) {
             listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return;
         }
-                listWrap.innerHTML = items.map(function (s, displayIdx) {
+        listWrap.innerHTML = items.map(function (s, displayIdx) {
             var realIdx = state.summaries.indexOf(s);
-            var floorInfo = (s.floorFrom >= 0 && s.floorTo >= 0) ? ' · <span style="color:#9999bb;">#' + s.floorFrom + '~#' + s.floorTo + '</span>' : '';
-            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + floorInfo + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
+            return '<div class="tlg-sh-item" data-real-idx="' + realIdx + '" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + '</span><span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div><div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div><div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;"><textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea><button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存档案</button></div><div style="margin-top:10px;display:flex;gap:8px;"><button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button><button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button></div></div>';
         }).join("");
         listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
             btn.addEventListener("click", function () {
@@ -751,83 +688,49 @@
     //   runSummaryWithMessages(messages) —— 传入已收集好的消息数组，用于跳转前自动总结
     //   runSummary(auto)                 —— 手动/自动触发，取当前可见消息
     // ══════════════════════════════════════
-    function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
+    function _doSummaryRequest(messagesArray, auto, sourceLabel) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
         if (!apiUrl) { toast("切片失败：未设置 API 地址。"); return; }
         if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); return; }
-
-        // 计算楼层范围
-        var st = getST();
-        var firstFloor = -1, lastFloor = -1;
-        if (st && st.chat) {
-            for (var fi = 0; fi < st.chat.length; fi++) {
-                if (st.chat[fi] === messagesArray[0] && firstFloor === -1) firstFloor = fi;
-                if (st.chat[fi] === messagesArray[messagesArray.length - 1]) lastFloor = fi;
-            }
-            if (firstFloor === -1 && messagesArray[0] && messagesArray[0].send_date) {
-                for (var fi2 = 0; fi2 < st.chat.length; fi2++) {
-                    if (st.chat[fi2].send_date === messagesArray[0].send_date && firstFloor === -1) firstFloor = fi2;
-                    if (st.chat[fi2].send_date === messagesArray[messagesArray.length - 1].send_date) lastFloor = fi2;
-                }
-            }
-        }
-        var floorLabel = (firstFloor >= 0 && lastFloor >= 0) ? " [#" + firstFloor + "~#" + lastFloor + "]" : "";
-
+        // 锁住当前世界ID，防止切换聊天后写入错位
         var lockedWorldId = currentWorldId;
         var recentChat = messagesArray.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
         var prompt = summaryPrompt.replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run"); if (btn) btn.disabled = true;
         var label = sourceLabel || (auto ? "自动" : "手动");
-        toast("⏳ " + label + "切片中…" + floorLabel);
-
-        // 禁用发送按钮
-        var sendBtn = document.getElementById("send_but");
-        if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
-
+        toast("⏳ " + label + "切片中…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
             body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 2048 })
         }).then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            // 使用锁住的worldId写入，不受切换聊天影响
             if (lockedWorldId && worlds[lockedWorldId]) {
                 if (!worlds[lockedWorldId].summaries) worlds[lockedWorldId].summaries = [];
-                worlds[lockedWorldId].summaries.push({
-                    timestamp: Date.now(), text: text, nodeId: state.currentNodeId,
-                    floorFrom: firstFloor, floorTo: lastFloor
-                });
-                                // 记录最后一次自动总结的范围（用于 swipe 重写）
-                if (auto && firstFloor >= 0 && lastFloor >= 0) {
-                    state.lastAutoSummaryRange = {
-                        floorFrom: firstFloor,
-                        floorTo: lastFloor,
-                        summaryIdx: worlds[lockedWorldId].summaries.length - 1
-                    };
-                }
+                worlds[lockedWorldId].summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId });
+                // 总结池上限保护
                 var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
                 var trimmed = 0;
                 if (worlds[lockedWorldId].summaries.length > maxCount) {
                     trimmed = worlds[lockedWorldId].summaries.length - maxCount;
                     worlds[lockedWorldId].summaries.splice(0, trimmed);
                 }
+                // 同步到 state（仅当世界没有切换时）
                 if (lockedWorldId === currentWorldId) {
                     state.summaries = worlds[lockedWorldId].summaries;
                     refreshSummary();
                 }
                 saveWorlds(); updateInjectionWithVector();
                 if (trimmed > 0) {
-                    toast("✓ " + label + "切片完成" + floorLabel + "（已清理最旧 " + trimmed + " 条）。");
+                    toast("✓ " + label + "切片完成（已清理最旧 " + trimmed + " 条）。");
                 } else {
-                    toast("✓ " + label + "切片完成" + floorLabel);
+                    toast("✓ " + label + "切片完成。");
                 }
             }
         }).catch(function (e) { toast("✗ " + label + "切片失败：" + e.message); })
-                .then(function () {
-            if (btn) btn.disabled = false;
-            if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
-            if (typeof onDone === "function") onDone();
-               });
+        .then(function () { if (btn) btn.disabled = false; });
     }
 
     function runSummaryWithMessages(messagesArray) {
@@ -837,59 +740,11 @@
     function runSummary(auto) {
         var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
         ensureWorldExists();
-        var count = auto ? (globalApi.autoInterval || 10) : (globalApi.manualCount || 20);
-        var visible = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
+        var countEl = document.getElementById("tlg-manual-count");
+        var count = auto ? (globalApi.autoInterval || 10) : (countEl ? Math.max(1, parseInt(countEl.value, 10) || 20) : 20);
+        var visible = st.chat.filter(function (m) { return !m.is_hidden; });
         var recent = visible.slice(-count);
         _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
-    }
-    function runCatchupSummary() {
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
-        ensureWorldExists();
-        var batchSize = globalApi.manualCount || 20;
-        var allMessages = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
-        if (!allMessages.length) { toast("没有可用消息。"); return; }
-
-        // 找出已被总结覆盖的最高楼层
-        var coveredUpTo = -1;
-        if (state.summaries && state.summaries.length) {
-            for (var i = 0; i < state.summaries.length; i++) {
-                var s = state.summaries[i];
-                if (typeof s.floorTo === "number" && s.floorTo > coveredUpTo) coveredUpTo = s.floorTo;
-            }
-        }
-
-        // 筛选未被覆盖的消息
-        var uncovered = [];
-        for (var j = 0; j < st.chat.length; j++) {
-            if (j <= coveredUpTo) continue;
-            if (st.chat[j]._tlg_hidden || st.chat[j].is_hidden) continue;
-            uncovered.push(st.chat[j]);
-        }
-        if (!uncovered.length) { toast("所有楼层已被覆盖，无需补全。"); return; }
-
-        // 分批执行
-        var batches = [];
-        for (var k = 0; k < uncovered.length; k += batchSize) {
-            batches.push(uncovered.slice(k, k + batchSize));
-        }
-
-        toast("📋 开始补全历史切片，共 " + batches.length + " 批…");
-        var sendBtn = document.getElementById("send_but");
-        if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
-        var btn = document.getElementById("tlg-summary-catchup-btn"); if (btn) btn.disabled = true;
-
-        var idx = 0;
-                function nextBatch() {
-            if (idx >= batches.length) {
-                toast("✓ 历史补全完成，共 " + batches.length + " 批。");
-                if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
-                if (btn) btn.disabled = false;
-                return;
-            }
-            var batch = batches[idx]; idx++;
-            _doSummaryRequest(batch, true, "补全 " + idx + "/" + batches.length, nextBatch);
-        }
-        nextBatch();
     }
 
     function fetchModelList() {
@@ -957,11 +812,11 @@
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return;
         var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
-        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:'result',-apple-system,sans-serif;overflow:hidden;";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
         panel.innerHTML = '<div id="tlg-tabs"><div class="tlg-tab active" data-tab="tree">命运分支线</div><div class="tlg-tab" data-tab="archive">观测坐标</div><div class="tlg-tab" data-tab="summary">因果档案</div><div class="tlg-tab" data-tab="worlds">诸世界</div><div class="tlg-tab" data-tab="engine">引擎核心</div><div id="tlg-close">✕</div></div><div id="tlg-body">' +
             '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas><div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;"><button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button><button type="button" class="tlg-btn" id="tlg-canvas-center-cur" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">◎ 定位当前</button><button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button></div></div><div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
             '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">全部锚定坐标</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div><div id="tlg-archive-list"></div></div></div>' +
-            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div><div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式（按步数）</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">因果流转每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步自动触发</label></div><div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条上下文黏性</label></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案库上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条（超出自动清理最旧）</label></div></div><div class="tlg-section"><div class="tlg-section-title">记录仪指令覆写</div><label class="tlg-label">逻辑模板（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea><div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">主动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步因果痕迹</label></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div><div class="tlg-section"><div class="tlg-section-title">观测档案库</div><div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">查阅已记录的因果碎片，包含抹除与覆写权限。</div><div id="tlg-summary-list"></div></div></div></div>' +
+            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div><div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式（按步数）</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">因果流转每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步自动触发</label></div><div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条上下文黏性</label></div><div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案库上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 条（超出自动清理最旧）</label></div></div><div class="tlg-section"><div class="tlg-section-title">记录仪指令覆写</div><label class="tlg-label">逻辑模板（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:120px">' + escHtml(s.summaryPrompt || "") + '</textarea><div class="tlg-row" style="margin-top:8px;"><label class="tlg-label" style="margin:0;flex:1">主动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="20" style="width:70px;display:inline-block;padding:4px 8px;margin:0 6px;font-size:14px"> 步因果痕迹</label></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div><div class="tlg-section"><div class="tlg-section-title">观测档案库</div><div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">查阅已记录的因果碎片，包含抹除与覆写权限。</div><div id="tlg-summary-list"></div></div></div></div>' +
             '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;"><div style="font-size:15px;font-weight:600;color:#ffffff;letter-spacing:1px;">维度图谱</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-worlds-import" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">凝望异世界</button></div><div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">当前实体连接: ' + escHtml(getCurrentChatId() || "未知") + (currentWorldId ? " → " + escHtml((worlds[currentWorldId] || {}).name || "") : " (未建立)") + '</div><div id="tlg-worlds-list"></div></div></div>' +
             '<div class="tlg-view" data-view="engine"><div class="tlg-scroll-panel"><div class="tlg-section"><div class="tlg-section-title">主解析引擎</div><label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div><div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div><label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div><label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:12px" /><label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div><label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" /><label class="tlg-label">联想提示词指令</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea></div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">锁定核心配置</button></div></div></div>';
         document.body.appendChild(panel); bindPanelEvents(panel);
@@ -1001,7 +856,6 @@
         document.getElementById("tlg-last-n").addEventListener("change", function () { globalApi.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5); saveGlobalApi(); });
         document.getElementById("tlg-summary-max").addEventListener("change", function () { globalApi.summaryMaxCount = Math.max(10, parseInt(this.value, 10) || 100); saveGlobalApi(); });
         document.getElementById("tlg-summary-prompt").addEventListener("change", function () { globalApi.summaryPrompt = this.value; saveGlobalApi(); });
-        document.getElementById("tlg-manual-count").addEventListener("change", function () { globalApi.manualCount = Math.max(1, parseInt(this.value, 10) || 20); saveGlobalApi(); });
         document.getElementById("tlg-summary-run").addEventListener("click", function () { flashBtn(this); runSummary(false); });
         document.getElementById("tlg-engine-save").addEventListener("click", function () {
             flashBtn(this);
@@ -1111,62 +965,21 @@
         injectMenuButton(); injectSettingsPanel();
         new MutationObserver(function () { injectMenuButton(); injectSettingsPanel(); }).observe(document.body, { childList: true, subtree: true });
         setInterval(injectMenuButton, 2000); registerSlashCommand();
-        try { loadCurrentWorld(); } catch (e) {}       
-        if (!currentWorldId && getCurrentChatId()) {
-            ensureWorldExists();
-            if (!state.nodes.length) resetState();
-            saveCurrentWorld();
-        }
-                        try {
+        try { loadCurrentWorld(); } catch (e) {}
+        try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                                var countFn = function () {
+                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
                     if (!isEnabled()) return;
                     state.turnsSinceAnchor = (state.turnsSinceAnchor || 0) + 1;
                     if (globalApi.autoMode && state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
-                        state.turnsSinceAnchor = 0;
-                        toast("⚙ 自律模式触发，开始自动切片…");
-                        runSummary(true);
+                        state.turnsSinceAnchor = 0; runSummary(true);
                     }
-                    // 平时也隐藏旧消息，只保留最近 N 条
-                    applyRecentVisibility();
                     saveCurrentWorld();
-                };
-            
-                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, countFn);
-                if (ctx1.eventTypes.MESSAGE_SWIPED) {
-                    ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SWIPED, function (msgIdx) {
-                        if (!isEnabled() || !state.lastAutoSummaryRange) return;
-                        var range = state.lastAutoSummaryRange;
-                        var idx = typeof msgIdx === "number" ? msgIdx : (msgIdx && msgIdx.id != null ? msgIdx.id : -1);
-                        if (idx < 0) { var st2 = getST(); idx = st2 && st2.chat ? st2.chat.length - 1 : -1; }
-                        if (idx < 0) { var st2 = getST(); idx = st2 && st2.chat ? st2.chat.length - 1 : -1; }
-                        if (idx >= range.floorFrom && idx <= range.floorTo) {
-                            if (state.summaries && state.summaries.length > range.summaryIdx) {
-                                state.summaries.splice(range.summaryIdx, 1);
-                                if (currentWorldId && worlds[currentWorldId]) {
-                                    worlds[currentWorldId].summaries = state.summaries;
-                                }
-                                saveWorlds();
-                            }
-                            state.lastAutoSummaryRange = null;
-                            state.turnsSinceAnchor = 0;
-                            toast("🔄 检测到重试，已撤销最近自动切片，将在下次达到阈值时重新切片。");
-                        }
-                    });
-                }
-                                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
+                });
+                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
                     var p = document.getElementById("tlg-panel"); if (p) p.remove();
                     canvas = null; ctx = null; document.body.style.overflow = "";
-                    // 新聊天自动创建世界
-                    setTimeout(function () {
-                        loadCurrentWorld();
-                        if (!currentWorldId && getCurrentChatId()) {
-                            ensureWorldExists();
-                            if (!state.nodes.length) resetState();
-                            saveCurrentWorld();
-                        }
-                    }, 500);
                 });
             }
         } catch (e) {}
