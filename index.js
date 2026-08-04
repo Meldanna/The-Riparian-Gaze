@@ -84,7 +84,11 @@
     function setEnabled(on) {
         try {
             getExtSettings().enabled = !!on; saveExtSettings();
-            if (!on) closePanel(); injectMenuButton();
+            if (!on) closePanel();
+            // 先移除再重建按钮以更新状态
+            var btn = document.getElementById("tlg-menu-btn");
+            if (btn) btn.remove();
+            setTimeout(function() { injectMenuButton(); }, 50); // 延迟避免Observer冲突
             var toggle = document.getElementById("tlg_enable_toggle");
             if (toggle) toggle.classList.toggle("on", !!on);
         } catch (e) {}
@@ -1710,10 +1714,15 @@
     // ══════════════════════════════════════
     // 菜单按钮注入
     // ══════════════════════════════════════
-    function injectMenuButton() {
+       function injectMenuButton() {
         var BTN_ID = "tlg-menu-btn";
         var existing = document.getElementById(BTN_ID);
-        if (existing) existing.remove();
+        if (existing) {
+            // 已存在，只更新开关状态，不重建
+            var toggle = existing.querySelector("#tlg_enable_toggle");
+            if (toggle) toggle.classList.toggle("on", isEnabled());
+            return;
+        }
 
         var targets = ["#extensionsMenu", "#extensionMenuItems", "#extension_menu", ".extensions_block"];
         var container = null;
@@ -1731,7 +1740,7 @@
         btn.onmouseenter = function() { btn.style.background = "rgba(255,255,255,0.04)"; };
         btn.onmouseleave = function() { btn.style.background = ""; };
         btn.onclick = function(e) {
-            if (e.target.id === "tlg_enable_toggle" || e.target.parentElement?.id === "tlg_enable_toggle") {
+            if (e.target.id === "tlg_enable_toggle" || (e.target.parentElement && e.target.parentElement.id === "tlg_enable_toggle")) {
                 e.stopPropagation(); setEnabled(!isEnabled()); return;
             }
             var panel = document.getElementById("tlg-panel");
