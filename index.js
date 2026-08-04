@@ -286,7 +286,7 @@
             st.reloadCurrentChat();
         }
     }
-    function applyJumpVisibility(targetNodeId) {
+        function applyJumpVisibility(targetNodeId) {
         var st = getST(); if (!st || !st.chat) return;
         var target = findNode(targetNodeId); if (!target) return;
         var lastN = Math.max(1, globalApi.lastNMessages || 5);
@@ -294,14 +294,19 @@
         var visStart = Math.max(0, endIdx - lastN + 1);
         for (var i = 0; i < st.chat.length; i++) {
             if (i >= visStart && i <= endIdx) {
-                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+                // 强制可见
+                delete st.chat[i].is_system;
+                delete st.chat[i]._tlg_hidden;
             } else {
-                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+                // 强制隐藏
+                st.chat[i].is_system = true;
+                st.chat[i]._tlg_hidden = true;
             }
         }
-        // 记录跳转状态，applyRecentVisibility 会据此判断模式
+        // 记录跳转状态
         state._jumpedToIdx = endIdx;
         state._chatLenAtJump = st.chat.length;
+        if (typeof st.saveChat === "function") st.saveChat();
         if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
     }
 
@@ -310,28 +315,31 @@
         var lastN = Math.max(1, globalApi.lastNMessages || 5);
         var total = st.chat.length;
 
-        // 跳转模式：以跳转目标为基准，显示目标前lastN + 跳转后新增的消息
+        // 跳转模式
         if (typeof state._jumpedToIdx === "number" && state._jumpedToIdx >= 0) {
             var visStart = Math.max(0, state._jumpedToIdx - lastN + 1);
             var visEnd = state._jumpedToIdx;
-            // 跳转后新增的消息也应可见（跳转时 chat 长度记在 _chatLenAtJump）
             var newStart = (typeof state._chatLenAtJump === "number") ? state._chatLenAtJump : total;
             for (var i = 0; i < total; i++) {
                 if ((i >= visStart && i <= visEnd) || i >= newStart) {
-                    if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+                    delete st.chat[i].is_system;
+                    delete st.chat[i]._tlg_hidden;
                 } else {
-                    if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+                    st.chat[i].is_system = true;
+                    st.chat[i]._tlg_hidden = true;
                 }
             }
             return;
         }
 
-        // 正常模式：显示最后 lastN 条
+        // 正常模式
         for (var j = 0; j < total; j++) {
             if (j >= total - lastN) {
-                if (st.chat[j]._tlg_hidden) { delete st.chat[j].is_system; delete st.chat[j]._tlg_hidden; }
+                delete st.chat[j].is_system;
+                delete st.chat[j]._tlg_hidden;
             } else {
-                if (!st.chat[j].is_system) { st.chat[j].is_system = true; st.chat[j]._tlg_hidden = true; }
+                st.chat[j].is_system = true;
+                st.chat[j]._tlg_hidden = true;
             }
         }
     }
