@@ -98,12 +98,16 @@
             if (toggle) toggle.classList.toggle("on", !!on);
         } catch (e) {}
     }
-    function loadGlobalApi() {
+        function loadGlobalApi() {
         var es = getExtSettings();
         if (es.api) {
             var keys = Object.keys(globalApi);
             for (var i = 0; i < keys.length; i++) {
-                if (es.api[keys[i]] !== undefined) globalApi[keys[i]] = es.api[keys[i]];
+                var k = keys[i];
+                if (es.api[k] === undefined) continue;
+                // 不用空字符串覆盖非空默认值（提示词保护）
+                if (es.api[k] === "" && typeof globalApi[k] === "string" && globalApi[k].length > 0) continue;
+                globalApi[k] = es.api[k];
             }
         }
     }
@@ -1967,7 +1971,7 @@
                 try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
+                        ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function () {
                     if (!isEnabled()) return;
                     loadGlobalApi();
                     var st2 = getST();
@@ -2002,7 +2006,7 @@
                     }
                 });
 
-                                if (ctx1.eventTypes.MESSAGE_SENT) {
+                if (ctx1.eventTypes.MESSAGE_SENT) {
                     ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SENT, function () {
                         if (!isEnabled()) return;
                         var st3 = getST();
@@ -2012,6 +2016,9 @@
                             if (curLen < state._lastChatLen) state._lastChatLen = curLen;
                             if (curLen > state._lastChatLen) state._lastChatLen = curLen;
                         }
+                        // 发消息时强制刷新隐藏，确保AI生成前状态正确
+                        applyRecentVisibility();
+                        if (st3 && typeof st3.saveChat === "function") st3.saveChat();
                     });
                 }
 
