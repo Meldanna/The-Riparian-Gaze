@@ -1,4 +1,4 @@
-/* 河岸凝视 v3.6 */
+/* 河岸凝视 v3 */
 (function () {
     "use strict";
 
@@ -18,9 +18,7 @@
     var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
-        rerankUrl: "", rerankKey: "", rerankModel: "", rerankModelList: [],
-        vectorTopK: 8,
-        rerankTopN: 3,
+        rerankUrl: "", rerankKey: "", rerankModel: "", rerankModelList: [], vectorTopK: 8, rerankTopN: 3,
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
         summaryPrompt: "你是因果记录仪。对以下对话执行状态切片，提取并压缩为因果档案。\n\n【因果事件链】本段发生的事件，按因果顺序（A导致B导致C），每条一句\n【样本状态变动】主角的生理、心理、物品、关系的变化\n【NPC状态变动】在场NPC的行为、立场、情绪变化\n【悬置因果线】未完成的选择、未触发的后果、埋下的伏笔\n【环境快照】地点·天气·时间·在场实体\n\n对话内容：\n{{context}}\n\n要求：纯事实记录，无评论，无修辞。输出格式：纯文本，不要使用markdown标记（禁止*、**、#等符号）。直接输出内容。",
         compressPrompt: "以下是若干条历史因果档案，请将其浓缩合并为一条，保留所有关键事件、状态变化和悬置因果线，删除重复和次要细节。输出格式：纯文本，禁止markdown标记，直接输出内容。\n\n{{context}}",
@@ -84,11 +82,7 @@
     function setEnabled(on) {
         try {
             getExtSettings().enabled = !!on; saveExtSettings();
-            if (!on) closePanel();
-            // 先移除再重建按钮以更新状态
-            var btn = document.getElementById("tlg-menu-btn");
-            if (btn) btn.remove();
-            setTimeout(function() { injectMenuButton(); }, 50); // 延迟避免Observer冲突
+            if (!on) closePanel(); injectMenuButton();
             var toggle = document.getElementById("tlg_enable_toggle");
             if (toggle) toggle.classList.toggle("on", !!on);
         } catch (e) {}
@@ -106,6 +100,7 @@
     function loadWorlds() { var es = getExtSettings(); if (es.worlds) worlds = JSON.parse(JSON.stringify(es.worlds)); }
     function saveWorlds() { var es = getExtSettings(); es.worlds = JSON.parse(JSON.stringify(worlds)); saveExtSettings(); }
 
+    // turnsSinceAnchor 单独存在 extensionSettings 根部，不依赖 currentWorldId
     function loadTurnsCounter() {
         var es = getExtSettings();
         if (typeof es.turnsSinceAnchor === "number") state.turnsSinceAnchor = es.turnsSinceAnchor;
@@ -274,6 +269,7 @@
                 if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
             }
         }
+        // reloadCurrentChat 让酒馆重新渲染，AI生成时正确过滤隐藏消息
         if (typeof st.reloadCurrentChat === "function") {
             st.reloadCurrentChat();
         }
@@ -313,10 +309,7 @@
         saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
 
-    // ══════════════════════════════════════
-    // 跳转（已修复重复总结）
-    // ══════════════════════════════════════
-    function jumpToNode(nodeId) {
+        function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
         var st = getST();
         var preJumpMessages = null;
@@ -338,7 +331,7 @@
                 if (st.chat[mi]._tlg_hidden || st.chat[mi].is_hidden) continue;
                 uncoveredVisible.push(st.chat[mi]);
             }
-            // 只有未覆盖消息满一个间隔才总结
+            // 只有满一个间隔才总结
             var interval = globalApi.autoInterval || 10;
             if (uncoveredVisible.length >= interval) {
                 var fullCount = Math.floor(uncoveredVisible.length / interval) * interval;
@@ -412,6 +405,7 @@
         var root = state.nodes.find(function (n) { return n.parentId === null; });
         if (root) assign(root.id, 0, 0); return positions;
     }
+
     function renderCanvas() {
         if (!canvas || !ctx) return;
         var dpr = window.devicePixelRatio || 1;
@@ -559,7 +553,7 @@
         var backdrop = document.createElement("div"); backdrop.id = "tlg-pin-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
         backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">📌 设为常用路径</div>' +
-            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">终点节点：' + escHtml(node.name) + '</div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">终点节点：' + escHtml(node.name) + '（可在观测坐标里调整终点）</div>' +
             '<label class="tlg-label">路径名称</label><input class="tlg-input" id="tlg-pin-name" value="' + escHtml(node.name + " 路径") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">路径描述</label><textarea class="tlg-textarea" id="tlg-pin-desc" placeholder="手写描述，或点击AI生成…" style="min-height:80px;margin-bottom:10px"></textarea>' +
             '<div class="tlg-modal-actions">' +
@@ -613,6 +607,7 @@
         var container = document.getElementById("tlg-pinned-paths"); if (!container) return;
         var paths = getPinnedPaths();
         if (!paths.length) { container.innerHTML = '<div style="color:#5a5a6a;font-size:12px;padding:8px 0;">暂无常用路径。点击节点可设置。</div>'; return; }
+        var nodeOpts = state.nodes.map(function(n){ return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + '</option>'; }).join("");
         container.innerHTML = paths.map(function(p) {
             var endNode = findNode(p.nodeId);
             var desc = p.userDesc || p.autoDesc || "";
@@ -679,6 +674,7 @@
 
     function refreshArchive() {
         var container = document.getElementById("tlg-archive-list"); if (!container) return;
+        // 常用路径区块
         refreshPinnedPaths();
         if (!state.nodes.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">河流静默，因果尚未铭刻。</div>'; return; }
         var sorted = state.nodes.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
@@ -696,21 +692,18 @@
             btn.onclick = function () {
                 if (btn.dataset.nid === state.currentNodeId) { toast("无法删除当前所在节点。"); return; }
                 var n = findNode(btn.dataset.nid);
-                if (!confirm("确定删除节点「" + (n ? n.name : "") + "」？子节点将重连至父级。")) return;
+                if (!confirm("确定删除节点「" + (n ? n.name : "") + "」？")) return;
                 deleteNode(btn.dataset.nid);
             };
         });
         container.querySelectorAll(".tlg-archive-graft").forEach(function (btn) { btn.onclick = function () { showGraftModal(btn.dataset.nid); }; });
     }
 
-    // ══════════════════════════════════════
-    // 删除节点（已修复：子节点重连父级）
-    // ══════════════════════════════════════
     function deleteNode(nodeId) {
         var node = findNode(nodeId); if (!node) return;
         if (!node.parentId) { toast("无法删除根节点。"); return; }
         var parent = findNode(node.parentId);
-        // 将被删节点的子节点重新挂载到父节点下
+        // 将被删节点的子节点重新挂载到父节点
         if (node.children && node.children.length > 0) {
             for (var i = 0; i < node.children.length; i++) {
                 var childId = node.children[i];
@@ -723,11 +716,7 @@
                 }
             }
         }
-        // 从父节点的 children 中移除被删节点
-        if (parent) {
-            parent.children = parent.children.filter(function (id) { return id !== nodeId; });
-        }
-        // 仅删除该节点本身
+        if (parent) parent.children = parent.children.filter(function (id) { return id !== nodeId; });
         state.nodes = state.nodes.filter(function (x) { return x.id !== nodeId; });
         if (state.currentNodeId === nodeId) state.currentNodeId = node.parentId;
         if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
@@ -748,120 +737,400 @@
         var newParent = findNode(newParentId); if (!newParent) { toast("目标节点不存在。"); return; }
         if (newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
         node.parentId = newParentId;
-        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("嫁接完成：" + node.name + " → " + newParent.name);
+        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已嫁接至「" + newParent.name + "」。");
     }
 
     function showGraftModal(nodeId) {
         var node = findNode(nodeId); if (!node) return;
+        var candidates = state.nodes.filter(function (n) { return n.id !== nodeId; });
+        if (!candidates.length) { toast("没有可嫁接的目标节点。"); return; }
         var existing = document.getElementById("tlg-graft-modal"); if (existing) existing.remove();
-        var opts = state.nodes.filter(function(n) { return n.id !== nodeId; }).map(function(n) {
-            return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + ' (#' + n.msgIdx + ')</option>';
-        }).join("");
         var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
+        var opts = candidates.map(function (n) { return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + (n.id === node.parentId ? " (当前父)" : "") + '</option>'; }).join("");
         backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⇢ 嫁接节点</div>' +
-            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」移动到新的父节点下</div>' +
-            '<label class="tlg-label">选择新父节点</label><select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:12px">' + opts + '</select>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其子树移动到新父节点下。</div>' +
+            '<label class="tlg-label">选择新父节点</label><select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
             '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-graft-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-graft-ok">确认嫁接</button></div></div>';
         document.body.appendChild(backdrop);
-        backdrop.querySelector("#tlg-graft-cancel").onclick = function() { backdrop.remove(); };
-        backdrop.querySelector("#tlg-graft-ok").onclick = function() {
-            var target = backdrop.querySelector("#tlg-graft-target").value;
-            if (!target) { toast("请选择目标节点。"); return; }
-            graftNode(nodeId, target); backdrop.remove();
+        var sel = backdrop.querySelector("#tlg-graft-target");
+        var nonParent = candidates.find(function (n) { return n.id !== node.parentId; });
+        if (nonParent) sel.value = nonParent.id;
+        backdrop.querySelector("#tlg-graft-cancel").onclick = function () { backdrop.remove(); };
+        backdrop.querySelector("#tlg-graft-ok").onclick = function () {
+            if (!sel.value) { toast("请选择目标节点。"); return; }
+            graftNode(nodeId, sel.value); backdrop.remove();
+        };
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
+    }
+
+    // ══════════════════════════════════════
+    // 总结 / 浓缩
+    // ══════════════════════════════════════
+    function refreshSummary() {
+        var list = document.getElementById("tlg-summary-list"); if (!list) return;
+        var catchupHtml = '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">📋 补全历史切片</button>';
+        if (!state.summaries || !state.summaries.length) {
+            list.innerHTML = '<div style="color:#5a5a6a;padding:20px 0;text-align:center;font-style:italic;">虚空寂寂，尚无因果被铭刻于此。</div>' + catchupHtml;
+            var cb = document.getElementById("tlg-summary-catchup-btn"); if (cb) cb.addEventListener("click", runCatchupSummary);
+            return;
+        }
+        var latest = state.summaries[state.summaries.length - 1];
+        var preview = (latest.text || "").slice(0, 120) + (latest.text && latest.text.length > 120 ? "…" : "");
+        var latestFloor = (latest.floorFrom >= 0 && latest.floorTo >= 0) ? ' · #' + latest.floorFrom + '~#' + latest.floorTo : '';
+        var compressedBadge = latest.compressed ? ' <span style="font-size:10px;background:#1a1a2a;border:1px solid #3a3a5a;color:#9090b0;padding:1px 5px;border-radius:3px;">已浓缩·' + (latest.sourceCount || "?") + '条</span>' : '';
+        list.innerHTML =
+            '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:12px;margin-bottom:8px;">' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:4px;">最新提取 · ' + new Date(latest.timestamp).toLocaleString() + latestFloor + compressedBadge + '</div>' +
+            '<div style="font-size:13px;white-space:pre-wrap;max-height:80px;overflow:hidden;color:#d0d0d8;line-height:1.6;">' + escHtml(preview) + '</div>' +
+            '</div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-history-btn" style="width:100%;margin-bottom:8px;">📜 观测档案库 (' + state.summaries.length + ' 条)</button>' +
+            catchupHtml;
+        document.getElementById("tlg-summary-history-btn").addEventListener("click", function () { switchTab("vault"); });
+        var cb2 = document.getElementById("tlg-summary-catchup-btn"); if (cb2) cb2.addEventListener("click", runCatchupSummary);
+    }
+
+    function refreshVault() {
+        var container = document.getElementById("tlg-vault-container"); if (!container) return;
+        // 浓缩控制区
+        var ctrlHtml = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">' +
+            '<input type="text" id="tlg-sh-search" placeholder="检索关键词…" style="flex:1;min-width:0;padding:8px 12px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:14px;outline:none;" />' +
+            '<span id="tlg-sh-count" style="font-size:12px;color:#7a7a8a;white-space:nowrap;">' + (state.summaries ? state.summaries.length : 0) + ' 条</span>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
+            '<button type="button" class="tlg-btn" id="tlg-vault-catchup" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">📋 补全历史切片</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-vault-compress-range" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🗜 选范围浓缩</button>' +
+            '</div>';
+        container.innerHTML = ctrlHtml + '<div id="tlg-sh-list"></div>';
+        renderSummaryList("");
+        document.getElementById("tlg-sh-search").addEventListener("input", function () { renderSummaryList(this.value.trim().toLowerCase()); });
+        document.getElementById("tlg-vault-catchup").addEventListener("click", runCatchupSummary);
+        document.getElementById("tlg-vault-compress-range").addEventListener("click", showCompressRangeModal);
+    }
+
+    function renderSummaryList(keyword) {
+        var listWrap = document.getElementById("tlg-sh-list"); if (!listWrap) return;
+        var items = (state.summaries || []).slice().reverse();
+        if (keyword) { items = items.filter(function (s) { return (s.text || "").toLowerCase().indexOf(keyword) !== -1; }); }
+        var countEl = document.getElementById("tlg-sh-count"); if (countEl) countEl.textContent = items.length + " 条";
+        if (!items.length) { listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return; }
+        listWrap.innerHTML = items.map(function (s) {
+            var realIdx = state.summaries.indexOf(s);
+            var floorInfo = (s.floorFrom >= 0 && s.floorTo >= 0) ? ' · <span style="color:#9999bb;">#' + s.floorFrom + '~#' + s.floorTo + '</span>' : '';
+            var compBadge = s.compressed ? ' <span style="font-size:10px;background:#1a1a2a;border:1px solid #3a3a5a;color:#9090b0;padding:1px 4px;border-radius:3px;">已浓缩·' + (s.sourceCount || "?") + '条</span>' : '';
+            return '<div class="tlg-sh-item" style="margin-bottom:10px;background:#050508;border:1px solid #1e1e2a;border-radius:4px;padding:12px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                '<span style="font-size:11px;color:#7a7a8a;">' + new Date(s.timestamp).toLocaleString() + floorInfo + compBadge + '</span>' +
+                '<span style="font-size:11px;color:#7a7a8a;">#' + (realIdx + 1) + '</span></div>' +
+                '<div class="tlg-sh-text" id="tlg-sh-text-' + realIdx + '" style="font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.8;max-height:200px;overflow-y:auto;color:#d0d0d8;">' + escHtml(s.text) + '</div>' +
+                '<div id="tlg-sh-editarea-' + realIdx + '" style="display:none;margin-top:8px;">' +
+                '<textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea>' +
+                '<button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存</button></div>' +
+                '<div style="margin-top:10px;display:flex;gap:8px;">' +
+                '<button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button>' +
+                (!s.compressed ? '<button type="button" class="tlg-btn tlg-sh-compress1" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🗜 单条浓缩</button>' : '') +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button>' +
+                '</div></div>';
+        }).join("");
+        listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var idx = Number(btn.dataset.idx);
+                var textDiv = document.getElementById("tlg-sh-text-" + idx);
+                var editArea = document.getElementById("tlg-sh-editarea-" + idx);
+                if (textDiv) textDiv.style.display = "none"; if (editArea) editArea.style.display = "block"; btn.style.display = "none";
+            });
+        });
+        listWrap.querySelectorAll(".tlg-sh-save").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                flashBtn(this); var idx = Number(btn.dataset.idx); var ta = document.getElementById("tlg-sh-ta-" + idx);
+                if (ta && state.summaries[idx]) state.summaries[idx].text = ta.value;
+                saveCurrentWorld(); refreshSummary();
+                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("档案已更新。");
+            });
+        });
+        listWrap.querySelectorAll(".tlg-sh-del").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var idx = Number(btn.dataset.idx); if (!confirm("确定抹除这条记录？")) return;
+                state.summaries.splice(idx, 1); saveCurrentWorld(); refreshSummary();
+                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("已抹除。");
+            });
+        });
+        listWrap.querySelectorAll(".tlg-sh-compress1").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                var idx = Number(btn.dataset.idx);
+                if (!confirm("将第 #" + (idx+1) + " 条单独浓缩（重写为更精简版本）？")) return;
+                compressSummaries([idx], function(compressed) {
+                    if (compressed) {
+                        state.summaries[idx] = compressed[0];
+                        saveCurrentWorld(); refreshSummary();
+                        var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase());
+                        toast("单条浓缩完成。");
+                    }
+                });
+            });
+        });
+    }
+
+    function showCompressRangeModal() {
+        var existing = document.getElementById("tlg-compress-modal"); if (existing) existing.remove();
+        if (!state.summaries || state.summaries.length < 2) { toast("至少需要2条总结才能选范围浓缩。"); return; }
+        var backdrop = document.createElement("div"); backdrop.id = "tlg-compress-modal";
+        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
+        var maxIdx = state.summaries.length;
+        var opts = state.summaries.map(function(s, i) { return '<option value="' + i + '">#' + (i+1) + ' · ' + new Date(s.timestamp).toLocaleDateString() + (s.compressed ? " [已浓缩]" : "") + '</option>'; }).join("");
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">🗜 选范围浓缩</div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">选择起止条目，将该范围内的未浓缩条目合并压缩为一条。</div>' +
+            '<label class="tlg-label">起始（含）</label><select class="tlg-select" id="tlg-cr-from" style="width:100%;margin-bottom:10px;">' + opts + '</select>' +
+            '<label class="tlg-label">结束（含）</label><select class="tlg-select" id="tlg-cr-to" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-cr-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-cr-ok">确认浓缩</button></div></div>';
+        document.body.appendChild(backdrop);
+        var fromSel = backdrop.querySelector("#tlg-cr-from");
+        var toSel = backdrop.querySelector("#tlg-cr-to");
+        toSel.selectedIndex = maxIdx - 1;
+        backdrop.querySelector("#tlg-cr-cancel").onclick = function() { backdrop.remove(); };
+        backdrop.querySelector("#tlg-cr-ok").onclick = function() {
+            var from = parseInt(fromSel.value, 10), to = parseInt(toSel.value, 10);
+            if (from > to) { toast("起始不能大于结束。"); return; }
+            var indices = [];
+            for (var i = from; i <= to; i++) { if (!state.summaries[i].compressed) indices.push(i); }
+            if (!indices.length) { toast("所选范围内无未浓缩条目。"); backdrop.remove(); return; }
+            backdrop.remove();
+            compressSummariesAndReplace(indices);
         };
         backdrop.addEventListener("click", function(e) { if (e.target === backdrop) backdrop.remove(); });
     }
 
-    // ══════════════════════════════════════
-    // 总结系统
-    // ══════════════════════════════════════
-    function buildEndpoint(base, path) {
-        var url = (base || "").trim();
-        if (!url) return "";
-        if (url.endsWith("/")) url = url.slice(0, -1);
-        if (!/\/v\d/.test(url)) url += "/v1";
-        return url + path;
+    // 浓缩核心：把 indices 对应的总结发给API浓缩，回调返回结果文本
+    function compressSummaries(indices, callback) {
+        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim(), model = (globalApi.model || "").trim();
+        if (!apiUrl) { toast("请先配置API地址。"); return; }
+        var texts = indices.map(function(i){ return state.summaries[i].text; }).join("\n\n---\n\n");
+        var prompt = (globalApi.compressPrompt || "").replace("{{context}}", texts);
+        toast("⏳ 浓缩中…");
+        fetch(buildEndpoint(apiUrl, "/chat/completions"), {
+            method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
+            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
+        }).then(function(r){ return r.json(); }).then(function(data){
+            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            callback([{ timestamp: Date.now(), text: text, nodeId: state.currentNodeId, compressed: true, sourceCount: indices.length }]);
+        }).catch(function(e){ toast("浓缩失败：" + e.message); });
     }
 
-    function _doSummaryRequest(messages, isBatch, label, callback, retryCount) {
-        retryCount = retryCount || 0;
+    // 把 indices 对应条目替换为一条浓缩结果
+    function compressSummariesAndReplace(indices) {
+        compressSummaries(indices, function(compressed) {
+            if (!compressed) return;
+            // 从大到小删除，避免索引偏移
+            var sorted = indices.slice().sort(function(a,b){ return b-a; });
+            sorted.forEach(function(i){ state.summaries.splice(i, 1); });
+            // 在最小索引位置插入浓缩结果
+            state.summaries.splice(indices[0], 0, compressed[0]);
+            saveCurrentWorld(); refreshSummary();
+            var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase());
+            toast("✓ 浓缩完成，" + indices.length + " 条合并为 1 条。");
+        });
+    }
+
+    // 检查是否需要自动浓缩（写入新总结后调用）
+    function checkAutoCompress() {
+        if (!globalApi.autoCompress) return;
+        var maxCount = Math.max(10, globalApi.summaryMaxCount || 100);
+        if (state.summaries.length <= maxCount) return;
+        // 取最旧的未浓缩条目
+        var batchSize = Math.max(2, globalApi.compressBatchSize || 10);
+        var indices = [];
+        for (var i = 0; i < state.summaries.length && indices.length < batchSize; i++) {
+            if (!state.summaries[i].compressed) indices.push(i);
+        }
+        if (indices.length < 2) {
+            toast("⚠ 档案库已满（" + state.summaries.length + " 条），已无可浓缩的未浓缩条目，请手动清理。");
+            return;
+        }
+        toast("⚙ 档案库已满，自动浓缩最旧 " + indices.length + " 条…");
+        compressSummariesAndReplace(indices);
+    }
+
+    // ── AI 接口 ──
+    function updateInjection() {
+        var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
+        if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 2); return; }
+        var items;
+        if (globalApi.summaryFilterMode !== false) {
+            var path = getPathToRoot(state.currentNodeId);
+            items = state.summaries.filter(function (s) { return !s.nodeId || path.indexOf(s.nodeId) !== -1; });
+        } else { items = state.summaries.slice(); }
+        if (!items.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 2); return; }
+        var count = Math.min(3, items.length); var recent = items.slice(-count);
+        var template = globalApi.vectorPrompt || ""; var content = recent.map(function (s) { return s.text; }).join("\n\n---\n\n");
+        var injectionText = (template && template.indexOf("{{context}}") !== -1) ? template.replace("{{context}}", content) : "以下为已记录的近期因果档案：\n\n" + content + "\n\n请保持叙事与上述记录的连续性。";
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 2);
+    }
+    function updateInjectionWithVector() {
+        var st = getST(); if (!st || typeof st.setExtensionPrompt !== "function") return;
+        if (!state.summaries || !state.summaries.length) { st.setExtensionPrompt(EXT_NAME, "", 1, 2); return; }
+        var vecUrl = (globalApi.vectorUrl || "").trim(), vecKey = (globalApi.vectorKey || "").trim(), vecModel = (globalApi.vectorModel || "").trim();
+        if (!vecUrl || !vecModel) { updateInjection(); return; }
+        var chat = (st.chat || []).slice(-5).map(function (m) { return (m.mes || "").slice(0, 200); }).join(" ");
+        _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, 0);
+    }
+
+    function _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, retryCount) {
         var MAX_RETRIES = 3;
-        var apiUrl = (globalApi.apiUrl || "").trim();
-        var apiKey = (globalApi.apiKey || "").trim();
-        var model = (globalApi.model || "").trim();
-        if (!apiUrl) { toast("请先配置API地址。"); if (callback) callback(); return; }
-
-        var chatText = messages.map(function(m) { return (m.name || m.role || "???") + ": " + (m.mes || m.content || ""); }).join("\n");
-        var prompt = (globalApi.summaryPrompt || "").replace("{{context}}", chatText);
-
-        // 计算楼层范围
-        var st = getST();
-        var floorFrom = -1, floorTo = -1;
-        if (st && st.chat) {
-            for (var fi = 0; fi < st.chat.length; fi++) {
-                if (st.chat[fi] === messages[0]) { floorFrom = fi; break; }
-            }
-            for (var fj = st.chat.length - 1; fj >= 0; fj--) {
-                if (st.chat[fj] === messages[messages.length - 1]) { floorTo = fj; break; }
-            }
-        }
-        // 如果无法通过引用匹配，使用消息内容匹配
-        if (floorFrom === -1 && st && st.chat && messages[0]) {
-            var firstMes = messages[0].mes || messages[0].content || "";
-            for (var fi2 = 0; fi2 < st.chat.length; fi2++) {
-                if ((st.chat[fi2].mes || "") === firstMes) { floorFrom = fi2; break; }
-            }
-        }
-        if (floorTo === -1 && st && st.chat && messages[messages.length - 1]) {
-            var lastMes = messages[messages.length - 1].mes || messages[messages.length - 1].content || "";
-            for (var fj2 = st.chat.length - 1; fj2 >= 0; fj2--) {
-                if ((st.chat[fj2].mes || "") === lastMes) { floorTo = fj2; break; }
-            }
-        }
-
-        fetch(buildEndpoint(apiUrl, "/chat/completions"), {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
-            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
-        }).then(function(r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            return r.json();
-        }).then(function(data) {
-            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            if (!text) { toast("⚠ 总结返回为空。"); if (callback) callback(); return; }
-            state.summaries.push({
-                id: generateId(), text: text, timestamp: Date.now(),
-                nodeId: state.currentNodeId, floorFrom: floorFrom, floorTo: floorTo,
-                label: label || ""
+        var topK = globalApi.vectorTopK || 8;
+        fetch(buildEndpoint(vecUrl, "/embeddings"), {
+            method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
+            body: JSON.stringify({ model: vecModel, input: chat })
+        }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
+            var queryVec = data.data && data.data[0] && data.data[0].embedding; if (!queryVec) { updateInjection(); return; }
+            var pool;
+            if (globalApi.summaryFilterMode !== false) {
+                var path = getPathToRoot(state.currentNodeId);
+                pool = state.summaries.filter(function (s) { return !s.nodeId || path.indexOf(s.nodeId) !== -1; });
+            } else { pool = state.summaries.slice(); }
+            var texts = pool.map(function (s) { return s.text; });
+            return fetch(buildEndpoint(vecUrl, "/embeddings"), {
+                method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
+                body: JSON.stringify({ model: vecModel, input: texts })
+            }).then(function (r2) { if (!r2.ok) throw new Error("HTTP " + r2.status); return r2.json(); }).then(function (data2) {
+                var embeddings = (data2.data || []).map(function (d) { return d.embedding; });
+                var scored = embeddings.map(function (emb, idx) {
+                    var dot = 0, na = 0, nb = 0;
+                    for (var k = 0; k < emb.length; k++) { dot += queryVec[k] * emb[k]; na += queryVec[k] * queryVec[k]; nb += emb[k] * emb[k]; }
+                    return { idx: idx, score: dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8) };
+                }).sort(function (a, b) { return b.score - a.score; });
+                var top = scored.slice(0, topK);
+                // 重排（如果配置了）
+                var rerankUrl = (globalApi.rerankUrl || "").trim();
+                var rerankKey = (globalApi.rerankKey || "").trim();
+                var rerankModel = (globalApi.rerankModel || "").trim();
+                if (rerankUrl && rerankModel && top.length > 1) {
+                    var documents = top.map(function (t) { return pool[t.idx].text; });
+                    _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, chat, documents, pool, top, 0);
+                } else {
+                    var topN = globalApi.rerankTopN || 3;
+                    var content = top.slice(0, topN).map(function (t) { return pool[t.idx].text; }).join("\n\n---\n\n");
+                    _doInject(st, content);
+                }
             });
-            // 自动压缩检查
-            if (globalApi.autoCompress && state.summaries.length >= (globalApi.compressBatchSize || 10) * 2) {
-                compressSummaries();
-            }
-            if (globalApi.summaryMaxCount && state.summaries.length > globalApi.summaryMaxCount) {
-                state.summaries = state.summaries.slice(-globalApi.summaryMaxCount);
-            }
-            saveCurrentWorld();
-            toast("✓ " + (label || "总结") + " 完成 (#" + floorFrom + "~#" + floorTo + ")");
-            refreshSummary();
-            if (callback) callback();
-        }).catch(function(e) {
-            console.error("[TLG] Summary error:", e);
+        }).catch(function (e) {
             if (retryCount < MAX_RETRIES) {
-                var delay = (retryCount + 1) * 2000;
-                toast("⚠ " + (label || "总结") + " 失败，" + delay / 1000 + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")…");
-                setTimeout(function() {
-                    _doSummaryRequest(messages, isBatch, label, callback, retryCount + 1);
-                }, delay);
+                var delay = (retryCount + 1) * 1500;
+                toast("⚠ 向量检索失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")…");
+                setTimeout(function () { _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, retryCount + 1); }, delay);
             } else {
-                toast("✗ " + (label || "总结") + " 最终失败: " + e.message);
-                if (callback) callback();
+                toast("⚠ 向量检索最终失败，使用直接注入。");
+                updateInjection();
             }
         });
     }
 
-    // 补全历史切片（已修复）
+    function _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, documents, pool, top, retryCount) {
+        var MAX_RETRIES = 2;
+        var topN = globalApi.rerankTopN || 3;
+        fetch(buildEndpoint(rerankUrl, "/rerank"), {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, rerankKey ? { Authorization: "Bearer " + rerankKey } : {}),
+            body: JSON.stringify({ model: rerankModel, query: query, documents: documents, top_n: topN })
+        }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
+            var results = data.results || [];
+            if (results.length) {
+                results.sort(function (a, b) { return b.relevance_score - a.relevance_score; });
+                var content = results.slice(0, topN).map(function (item) { return documents[item.index]; }).join("\n\n---\n\n");
+                _doInject(st, content);
+            } else {
+                var content2 = documents.slice(0, topN).join("\n\n---\n\n");
+                _doInject(st, content2);
+            }
+        }).catch(function (e) {
+            if (retryCount < MAX_RETRIES) {
+                var delay = (retryCount + 1) * 1500;
+                toast("⚠ 重排失败，" + (delay / 1000) + "秒后重试…");
+                setTimeout(function () { _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, documents, pool, top, retryCount + 1); }, delay);
+            } else {
+                toast("⚠ 重排最终失败，使用向量原始排序。");
+                var content3 = documents.slice(0, topN).join("\n\n---\n\n");
+                _doInject(st, content3);
+            }
+        });
+    }
+
+    function _doInject(st, content) {
+        var template = globalApi.vectorPrompt || "";
+        var injectionText = template.indexOf("{{context}}") !== -1 ? template.replace("{{context}}", content) : "以下为与当前情境相关的因果档案：\n\n" + content;
+        st.setExtensionPrompt(EXT_NAME, injectionText, 1, 2);
+    }
+
+    function buildEndpoint(base, path) {
+        var url = (base || "").trim().replace(/\/+$/, "");
+        if (path === "/chat/completions" && /\/chat\/completions$/.test(url)) return url;
+        if (path === "/models" && /\/models$/.test(url)) return url;
+        if (!/\/v\d+/.test(url)) url += "/v1"; return url + path;
+    }
+
+    function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
+        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
+        var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
+        if (!apiUrl) { toast("切片失败：未设置 API 地址。"); if (typeof onDone === "function") onDone(); return; }
+        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); if (typeof onDone === "function") onDone(); return; }
+
+        var st = getST();
+        var firstFloor = -1, lastFloor = -1;
+        if (st && st.chat) {
+            for (var fi = 0; fi < st.chat.length; fi++) {
+                if (st.chat[fi] === messagesArray[0] && firstFloor === -1) firstFloor = fi;
+                if (st.chat[fi] === messagesArray[messagesArray.length - 1]) lastFloor = fi;
+            }
+        }
+        var floorLabel = (firstFloor >= 0 && lastFloor >= 0) ? " [#" + firstFloor + "~#" + lastFloor + "]" : "";
+        var lockedWorldId = currentWorldId;
+        var recentChat = messagesArray.map(function (m) { return (m.name || m.role || "???") + ": " + (m.mes || ""); }).join("\n");
+        var prompt = summaryPrompt.replace("{{context}}", recentChat);
+        var btn = document.getElementById("tlg-summary-run"); if (btn) btn.disabled = true;
+        var label = sourceLabel || (auto ? "自动" : "手动");
+        toast("⏳ " + label + "切片中…" + floorLabel);
+        var sendBtn = document.getElementById("send_but");
+        if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
+
+        fetch(buildEndpoint(apiUrl, "/chat/completions"), {
+            method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
+            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 2048 })
+        }).then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (data) {
+            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            if (lockedWorldId && worlds[lockedWorldId]) {
+                if (!worlds[lockedWorldId].summaries) worlds[lockedWorldId].summaries = [];
+                worlds[lockedWorldId].summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId, floorFrom: firstFloor, floorTo: lastFloor });
+                if (auto && firstFloor >= 0 && lastFloor >= 0) {
+                    state.lastAutoSummaryRange = { floorFrom: firstFloor, floorTo: lastFloor, summaryIdx: worlds[lockedWorldId].summaries.length - 1 };
+                }
+                if (lockedWorldId === currentWorldId) {
+                    state.summaries = worlds[lockedWorldId].summaries;
+                    refreshSummary();
+                }
+                saveWorlds(); updateInjectionWithVector();
+                // 检查是否需要自动浓缩（上限保护）
+                checkAutoCompress();
+                toast("✓ " + label + "切片完成" + floorLabel);
+            }
+        }).catch(function (e) { toast("✗ " + label + "切片失败：" + e.message); })
+        .then(function () {
+            if (btn) btn.disabled = false;
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
+            if (typeof onDone === "function") onDone();
+        });
+    }
+
+    function runSummaryWithMessages(messagesArray) { _doSummaryRequest(messagesArray, true, "跳转前"); }
+
+    function runSummary(auto) {
+        var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
+        ensureWorldExists();
+        var count = auto ? (globalApi.autoInterval || 10) : (globalApi.manualCount || 20);
+        var visible = st.chat.filter(function (m) { return !m._tlg_hidden && !m.is_hidden; });
+        var recent = visible.slice(-count);
+        _doSummaryRequest(recent, auto, auto ? "自动" : "手动");
+    }
+
     function runCatchupSummary() {
         var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
         ensureWorldExists();
@@ -877,7 +1146,7 @@
         // 收集未覆盖楼层（跳过#0开场白）
         var uncovered = [];
         for (var j = 0; j < st.chat.length; j++) {
-            if (j === 0) continue; // 跳过开场白
+            if (j === 0) continue;
             if (j <= coveredUpTo) continue;
             if (st.chat[j]._tlg_hidden || st.chat[j].is_hidden) continue;
             uncovered.push(st.chat[j]);
@@ -887,7 +1156,7 @@
         var batches = [];
         for (var k = 0; k < uncovered.length; k += batchSize) {
             var batch = uncovered.slice(k, k + batchSize);
-            if (batch.length < batchSize) break; // 不满一批则不总结
+            if (batch.length < batchSize) break;
             batches.push(batch);
         }
         if (!batches.length) { toast("未覆盖消息不足 " + batchSize + " 条，暂不补全。"); return; }
@@ -895,13 +1164,13 @@
         var sendBtn = document.getElementById("send_but");
         if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
         var catchupBtns = document.querySelectorAll("#tlg-summary-catchup-btn,#tlg-vault-catchup");
-        catchupBtns.forEach(function(b) { b.disabled = true; });
+        catchupBtns.forEach(function(b){ b.disabled = true; });
         var idx = 0;
         function nextBatch() {
             if (idx >= batches.length) {
                 toast("✓ 历史补全完成，共 " + batches.length + " 批。");
                 if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
-                catchupBtns.forEach(function(b) { b.disabled = false; });
+                catchupBtns.forEach(function(b){ b.disabled = false; });
                 return;
             }
             var batch = batches[idx]; idx++;
@@ -910,942 +1179,383 @@
         nextBatch();
     }
 
-    function runManualSummary() {
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
-        ensureWorldExists();
-        var count = Math.max(1, globalApi.manualCount || 20);
-        var messages = st.chat.slice(-count).filter(function(m) { return !m._tlg_hidden && !m.is_hidden; });
-        if (!messages.length) { toast("无可用消息。"); return; }
-        toast("📝 总结最近 " + messages.length + " 条消息…");
-        _doSummaryRequest(messages, false, "手动总结");
+    function fetchModelList() {
+        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
+        if (!apiUrl) { toast("请先设置 API 地址。"); return; }
+        var btn = document.getElementById("tlg-fetch-models"); if (btn) btn.disabled = true; toast("正在检测可用模型…");
+        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
+        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (data) {
+            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
+            globalApi.modelList = models; saveGlobalApi(); populateModelSelect(); toast("已识别 " + models.length + " 个核心模型。");
+        }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
     }
-
-    function compressSummaries() {
-        var batchSize = globalApi.compressBatchSize || 10;
-        if (state.summaries.length < batchSize) { toast("档案不足，无需压缩。"); return; }
-        var apiUrl = (globalApi.apiUrl || "").trim();
-        if (!apiUrl) { toast("请先配置API地址。"); return; }
-        var batch = state.summaries.slice(0, batchSize);
-        var context = batch.map(function(s) { return s.text; }).join("\n---\n");
-        var prompt = (globalApi.compressPrompt || "").replace("{{context}}", context);
-        var apiKey = (globalApi.apiKey || "").trim();
-        var model = (globalApi.model || "").trim();
-        toast("🗜 压缩前 " + batchSize + " 条档案…");
-        fetch(buildEndpoint(apiUrl, "/chat/completions"), {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
-            body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
-        }).then(function(r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function(data) {
-            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            if (!text) { toast("压缩返回为空。"); return; }
-            var minFloor = Infinity, maxFloor = -1;
-            batch.forEach(function(s) {
-                if (typeof s.floorFrom === "number" && s.floorFrom < minFloor) minFloor = s.floorFrom;
-                if (typeof s.floorTo === "number" && s.floorTo > maxFloor) maxFloor = s.floorTo;
-            });
-            state.summaries = state.summaries.slice(batchSize);
-            state.summaries.unshift({
-                id: generateId(), text: text, timestamp: Date.now(), nodeId: state.currentNodeId,
-                floorFrom: minFloor === Infinity ? -1 : minFloor, floorTo: maxFloor,
-                label: "压缩档案 (#" + (minFloor === Infinity ? "?" : minFloor) + "~#" + maxFloor + ")",
-                compressed: true
-            });
-            saveCurrentWorld(); toast("✓ 压缩完成。"); refreshSummary();
-        }).catch(function(e) { toast("✗ 压缩失败: " + e.message); });
+    function populateModelSelect() {
+        var sel = document.getElementById("tlg-model-select"); if (!sel) return;
+        sel.innerHTML = '<option value="">-- 选择演算核心 --</option>' + (globalApi.modelList || []).map(function (m) { return '<option value="' + escHtml(m) + '"' + (m === globalApi.model ? " selected" : "") + ">" + escHtml(m) + "</option>"; }).join("");
     }
-
-    function refreshSummary() {
-        var list = document.getElementById("tlg-summary-list"); if (!list) return;
-        if (!state.summaries || !state.summaries.length) { list.innerHTML = '<div style="color:#5a5a6a;font-style:italic">河流安静，尚无因果档案。</div>'; return; }
-        list.innerHTML = state.summaries.slice().reverse().map(function(s, ri) {
-            var idx = state.summaries.length - 1 - ri;
-            return '<div style="background:#050508;border:1px solid #2a2a3a;border-radius:4px;padding:10px;margin-bottom:8px;position:relative;">' +
-                '<div style="font-size:11px;color:#7a7a8a;margin-bottom:4px;">' + new Date(s.timestamp).toLocaleString() + (s.label ? ' · ' + escHtml(s.label) : '') +
-                (typeof s.floorFrom === "number" && s.floorFrom >= 0 ? ' · #' + s.floorFrom + '~#' + s.floorTo : '') +
-                (s.compressed ? ' · 🗜' : '') + '</div>' +
-                '<div style="font-size:12px;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + escHtml(s.text) + '</div>' +
-                '<button type="button" class="tlg-btn tlg-btn-danger tlg-sum-del" data-idx="' + idx + '" style="position:absolute;top:8px;right:8px;font-size:10px;padding:2px 6px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div>';
-        }).join("");
-        list.querySelectorAll(".tlg-sum-del").forEach(function(btn) {
-            btn.onclick = function() { state.summaries.splice(Number(btn.dataset.idx), 1); saveCurrentWorld(); refreshSummary(); };
-        });
-    }
-
-    // ══════════════════════════════════════
-    // 向量注入 + 重排
-    // ══════════════════════════════════════
-    function updateInjectionWithVector() {
-        if (!state.summaries || !state.summaries.length) { clearInjection(); return; }
-        var st = getST(); if (!st) return;
-        var vecUrl = (globalApi.vectorUrl || "").trim();
-        if (vecUrl && globalApi.vectorKey) {
-            vectorSearchAndInject();
-        } else {
-            directInject();
-        }
-    }
-
-    function directInject() {
-        var filtered = filterSummariesForPath();
-        var text = filtered.map(function(s) { return s.text; }).join("\n---\n");
-        var prompt = (globalApi.vectorPrompt || "{{context}}").replace("{{context}}", text);
-        injectToChat(prompt);
-    }
-
-    function vectorSearchAndInject(retryCount) {
-        retryCount = retryCount || 0;
-        var MAX_RETRIES = 3;
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { directInject(); return; }
-        var recentMsgs = st.chat.slice(-3).map(function(m) { return (m.mes || "").slice(0, 200); }).join(" ");
-        if (!recentMsgs.trim()) { directInject(); return; }
-
-        var vecUrl = (globalApi.vectorUrl || "").trim();
-        var vecKey = (globalApi.vectorKey || "").trim();
-        var vecModel = (globalApi.vectorModel || "").trim();
-        if (!vecUrl) { directInject(); return; }
-
-        // Step 1: Embed query
-        var embedEndpoint = buildEndpoint(vecUrl, "/embeddings");
-        fetch(embedEndpoint, {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
-            body: JSON.stringify({ model: vecModel || undefined, input: recentMsgs })
-        }).then(function(r) {
-            if (!r.ok) throw new Error("嵌入请求失败 HTTP " + r.status);
-            return r.json();
-        }).then(function(data) {
-            var queryEmbed = null;
-            if (data.data && data.data[0] && data.data[0].embedding) {
-                queryEmbed = data.data[0].embedding;
-            }
-            if (!queryEmbed) { throw new Error("嵌入响应格式异常"); }
-            return embedSummariesAndSearch(queryEmbed);
-        }).then(function(topResults) {
-            // Step 3: Rerank if configured
-            var rerankUrl = (globalApi.rerankUrl || "").trim();
-            if (rerankUrl && globalApi.rerankKey && topResults.length > 1) {
-                return rerankResults(recentMsgs, topResults);
-            }
-            return topResults;
-        }).then(function(finalResults) {
-            var topN = globalApi.rerankTopN || 3;
-            var results = finalResults.slice(0, topN);
-            var context = results.map(function(r) { return r.text; }).join("\n---\n");
-            var prompt = (globalApi.vectorPrompt || "{{context}}").replace("{{context}}", context);
-            injectToChat(prompt);
-        }).catch(function(e) {
-            console.error("[TLG] Vector search error:", e);
-            if (retryCount < MAX_RETRIES) {
-                var delay = (retryCount + 1) * 1500;
-                toast("⚠ 向量检索失败，" + delay / 1000 + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")…");
-                setTimeout(function() { vectorSearchAndInject(retryCount + 1); }, delay);
-            } else {
-                toast("⚠ 向量检索最终失败，使用直接注入。");
-                directInject();
-            }
-        });
-    }
-
-    function embedSummariesAndSearch(queryEmbed) {
-        var filtered = filterSummariesForPath();
-        if (!filtered.length) return Promise.resolve([]);
-
-        var vecUrl = (globalApi.vectorUrl || "").trim();
-        var vecKey = (globalApi.vectorKey || "").trim();
-        var vecModel = (globalApi.vectorModel || "").trim();
-        var topK = globalApi.vectorTopK || 8;
-
-        var texts = filtered.map(function(s) { return s.text.slice(0, 500); });
-        var embedEndpoint = buildEndpoint(vecUrl, "/embeddings");
-
-        return fetch(embedEndpoint, {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, vecKey ? { Authorization: "Bearer " + vecKey } : {}),
-            body: JSON.stringify({ model: vecModel || undefined, input: texts })
-        }).then(function(r) {
-            if (!r.ok) throw new Error("档案嵌入失败 HTTP " + r.status);
-            return r.json();
-        }).then(function(data) {
-            if (!data.data || !data.data.length) throw new Error("档案嵌入响应异常");
-            // 余弦相似度排序
-            var scored = [];
-            for (var i = 0; i < data.data.length; i++) {
-                var emb = data.data[i].embedding;
-                if (!emb) continue;
-                var sim = cosineSimilarity(queryEmbed, emb);
-                scored.push({ text: filtered[i].text, score: sim, summary: filtered[i] });
-            }
-            scored.sort(function(a, b) { return b.score - a.score; });
-            return scored.slice(0, topK);
-        });
-    }
-
-    function rerankResults(query, results, retryCount) {
-        retryCount = retryCount || 0;
-        var MAX_RETRIES = 2;
-        var rerankUrl = (globalApi.rerankUrl || "").trim();
-        var rerankKey = (globalApi.rerankKey || "").trim();
-        var rerankModel = (globalApi.rerankModel || "").trim();
-        var topN = globalApi.rerankTopN || 3;
-
-        if (!rerankUrl) return Promise.resolve(results.slice(0, topN));
-
-        var documents = results.map(function(r) { return r.text; });
-        var endpoint = buildEndpoint(rerankUrl, "/rerank");
-
-        return fetch(endpoint, {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, rerankKey ? { Authorization: "Bearer " + rerankKey } : {}),
-            body: JSON.stringify({
-                model: rerankModel || undefined,
-                query: query,
-                documents: documents,
-                top_n: topN
-            })
-        }).then(function(r) {
-            if (!r.ok) throw new Error("重排请求失败 HTTP " + r.status);
-            return r.json();
-        }).then(function(data) {
-            // 标准 rerank 响应: { results: [{ index, relevance_score }] }
-            if (data.results && data.results.length) {
-                var reranked = data.results.sort(function(a, b) { return b.relevance_score - a.relevance_score; });
-                return reranked.slice(0, topN).map(function(item) { return results[item.index]; });
-            }
-            // 兜底
-            return results.slice(0, topN);
-        }).catch(function(e) {
-            console.error("[TLG] Rerank error:", e);
-            if (retryCount < MAX_RETRIES) {
-                var delay = (retryCount + 1) * 1500;
-                toast("⚠ 重排失败，" + delay / 1000 + "秒后重试…");
-                return new Promise(function(resolve) {
-                    setTimeout(function() { resolve(rerankResults(query, results, retryCount + 1)); }, delay);
-                });
-            }
-            toast("⚠ 重排最终失败，使用原始排序。");
-            return results.slice(0, topN);
-        });
-    }
-
-    function cosineSimilarity(a, b) {
-        if (!a || !b || a.length !== b.length) return 0;
-        var dot = 0, na = 0, nb = 0;
-        for (var i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-        var denom = Math.sqrt(na) * Math.sqrt(nb);
-        return denom === 0 ? 0 : dot / denom;
-    }
-
-    function filterSummariesForPath() {
-        if (!globalApi.summaryFilterMode) return state.summaries || [];
-        var pathIds = getPathToRoot(state.currentNodeId);
-        return (state.summaries || []).filter(function(s) {
-            if (!s.nodeId) return true;
-            return pathIds.indexOf(s.nodeId) !== -1;
-        });
-    }
-
-    function injectToChat(prompt) {
-        var st = getST(); if (!st) return;
-        // 使用 SillyTavern 的 setExtensionPrompt 注入
-        if (typeof st.setExtensionPrompt === "function") {
-            st.setExtensionPrompt(EXT_NAME, prompt, 1, 0);
-        }
-    }
-
-    function clearInjection() {
-        var st = getST(); if (!st) return;
-        if (typeof st.setExtensionPrompt === "function") {
-            st.setExtensionPrompt(EXT_NAME, "", 1, 0);
-        }
-    }
-
-    // ══════════════════════════════════════
-    // 世界管理
-    // ══════════════════════════════════════
-    function refreshWorlds() {
-        var container = document.getElementById("tlg-worlds-list"); if (!container) return;
-        var ids = Object.keys(worlds);
-        if (!ids.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:20px;text-align:center;font-style:italic">尚无观测世界。请在聊天中锚定以自动创建。</div>'; return; }
-        ids.sort(function(a, b) { return (worlds[b].updatedAt || 0) - (worlds[a].updatedAt || 0); });
-        container.innerHTML = ids.map(function(wid) {
-            var w = worlds[wid]; var isCurrent = wid === currentWorldId;
-            return '<div class="tlg-archive-card ' + (isCurrent ? "current" : "") + '" style="margin-bottom:10px;">' +
-                '<div class="tlg-archive-title">' + escHtml(w.name) + (isCurrent ? " <span style='color:#7a7a8a;font-size:11px'>(当前)</span>" : "") + '</div>' +
-                '<div class="tlg-archive-meta">' + (w.nodes ? w.nodes.length : 0) + ' 节点 · ' + (w.summaries ? w.summaries.length : 0) + ' 档案 · 更新: ' + new Date(w.updatedAt || w.createdAt).toLocaleString() + '</div>' +
-                '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button type="button" class="tlg-btn tlg-worlds-switch" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">' + (isCurrent ? "✓ 当前" : "切换") + '</button>' +
-                '<button type="button" class="tlg-btn tlg-worlds-rename" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✎ 命名</button>' +
-                '<button type="button" class="tlg-btn tlg-worlds-export" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">↓ 导出</button>' +
-                '<button type="button" class="tlg-btn tlg-btn-danger tlg-worlds-del" data-wid="' + wid + '" style="margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button>' +
-                '</div></div>';
-        }).join("");
-        container.querySelectorAll(".tlg-worlds-switch").forEach(function(btn) {
-            btn.onclick = function() {
-                var wid = btn.dataset.wid;
-                if (wid === currentWorldId) return;
-                currentWorldId = wid; setLinkedWorldId(wid);
-                var w = worlds[wid];
-                state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
-                state.selectedNodeId = null;
-                renderCanvas(); refreshArchive(); refreshWorlds(); toast("已切换至: " + w.name);
-            };
-        });
-        container.querySelectorAll(".tlg-worlds-rename").forEach(function(btn) {
-            btn.onclick = function() {
-                var w = worlds[btn.dataset.wid]; if (!w) return;
-                var name = prompt("新世界名称：", w.name); if (name === null) return; name = name.trim(); if (!name) return;
-                w.name = name;
-                saveWorlds(); refreshWorlds(); toast("已重命名。");
-            };
-        });
-        container.querySelectorAll(".tlg-worlds-export").forEach(function(btn) {
-            btn.onclick = function() {
-                var w = worlds[btn.dataset.wid]; if (!w) return;
-                var json = JSON.stringify(w, null, 2);
-                var blob = new Blob([json], { type: "application/json" });
-                var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-                a.download = "TLG_" + (w.name || "world") + ".json"; a.click();
-                toast("已导出: " + w.name);
-            };
-        });
-        container.querySelectorAll(".tlg-worlds-del").forEach(function(btn) {
-            btn.onclick = function() {
-                var wid = btn.dataset.wid; var w = worlds[wid]; if (!w) return;
-                if (!confirm("删除世界「" + w.name + "」？此操作不可恢复。")) return;
-                delete worlds[wid];
-                if (currentWorldId === wid) { currentWorldId = null; resetState(); }
-                saveWorlds(); refreshWorlds(); renderCanvas(); refreshArchive(); toast("世界已删除。");
-            };
-        });
-    }
-
-    function importWorld() {
-        var input = document.createElement("input"); input.type = "file"; input.accept = ".json";
-        input.onchange = function() {
-            var file = input.files[0]; if (!file) return;
-            var reader = new FileReader();
-            reader.onload = function() {
-                try {
-                    var data = JSON.parse(reader.result);
-                    if (!data.nodes || !data.nodes.length) { toast("文件格式无效。"); return; }
-                    var wid = data.id || generateId();
-                    if (worlds[wid]) wid = generateId();
-                    data.id = wid;
-                    worlds[wid] = data;
-                    saveWorlds(); refreshWorlds(); toast("已导入世界: " + (data.name || wid));
-                } catch (e) { toast("导入失败: " + e.message); }
-            };
-            reader.readAsText(file);
-        };
-        input.click();
-    }
-
     function createNewWorldManual() {
         var chatId = getCurrentChatId();
         var name = prompt("新世界名称：", chatId || ("世界 " + (Object.keys(worlds).length + 1)));
         if (name === null) return;
         name = name.trim() || ("世界 " + (Object.keys(worlds).length + 1));
-        var wid = generateId();
-        var rootId = generateId();
+        var wid = generateId(); var rootId = generateId();
         worlds[wid] = {
             id: wid, name: name, chatId: chatId,
             nodes: [{ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] }],
             summaries: [], currentNodeId: rootId, pinnedPaths: [],
             createdAt: Date.now(), updatedAt: Date.now()
         };
-        currentWorldId = wid;
-        setLinkedWorldId(wid);
-        state.nodes = worlds[wid].nodes;
-        state.summaries = [];
-        state.currentNodeId = rootId;
-        state.selectedNodeId = null;
-        saveWorlds();
-        toast("✦ 新世界已创建: " + name);
-        refreshWorlds(); renderCanvas(); refreshArchive();
+        currentWorldId = wid; setLinkedWorldId(wid);
+        state.nodes = worlds[wid].nodes; state.summaries = []; state.currentNodeId = rootId; state.selectedNodeId = null;
+        saveWorlds(); toast("✦ 新世界已创建: " + name); refreshWorlds(); renderCanvas(); refreshArchive();
+    }
+    function fetchVectorModelList() {
+        var apiUrl = (globalApi.vectorUrl || "").trim(), apiKey = (globalApi.vectorKey || "").trim();
+        if (!apiUrl) { toast("请先设置向量 API 地址。"); return; }
+        var btn = document.getElementById("tlg-fetch-vec-models"); if (btn) btn.disabled = true; toast("检测向量模型…");
+        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
+        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (data) {
+            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
+            globalApi.vectorModelList = models; saveGlobalApi(); populateVectorModelSelect(); toast("已识别 " + models.length + " 个向量模型。");
+        }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
+    }
+        function fetchRerankModelList() {
+        var apiUrl = (globalApi.rerankUrl || "").trim(), apiKey = (globalApi.rerankKey || "").trim();
+        if (!apiUrl) { toast("请先设置重排 API 地址。"); return; }
+        var btn = document.getElementById("tlg-fetch-rerank-models"); if (btn) btn.disabled = true; toast("检测重排模型…");
+        fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
+        .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+        .then(function (data) {
+            var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
+            globalApi.rerankModelList = models; saveGlobalApi(); populateRerankModelSelect(); toast("已识别 " + models.length + " 个重排模型。");
+        }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
+    }
+    function populateRerankModelSelect() {
+        var sel = document.getElementById("tlg-rerank-model-select"); if (!sel) return;
+        sel.innerHTML = '<option value="">-- 选择重排核心 --</option>' + (globalApi.rerankModelList || []).map(function (m) { return '<option value="' + escHtml(m) + '"' + (m === globalApi.rerankModel ? " selected" : "") + ">" + escHtml(m) + "</option>"; }).join("");
+    }
+    function populateVectorModelSelect() {
+        var sel = document.getElementById("tlg-vec-model-select"); if (!sel) return;
+        sel.innerHTML = '<option value="">-- 选择辅助核心 --</option>' + (globalApi.vectorModelList || []).map(function (m) { return '<option value="' + escHtml(m) + '"' + (m === globalApi.vectorModel ? " selected" : "") + ">" + escHtml(m) + "</option>"; }).join("");
     }
 
-    // ══════════════════════════════════════
-    // API 模型列表拉取
-    // ══════════════════════════════════════
-    function fetchModelList(type, retryCount) {
-        retryCount = retryCount || 0;
-        var MAX_RETRIES = 3;
-        var url, key, listField;
-        if (type === "vector") {
-            url = (globalApi.vectorUrl || "").trim();
-            key = (globalApi.vectorKey || "").trim();
-            listField = "vectorModelList";
-        } else if (type === "rerank") {
-            url = (globalApi.rerankUrl || "").trim();
-            key = (globalApi.rerankKey || "").trim();
-            listField = "rerankModelList";
-        } else {
-            url = (globalApi.apiUrl || "").trim();
-            key = (globalApi.apiKey || "").trim();
-            listField = "modelList";
-        }
-        if (!url) { toast("请先填写" + (type === "vector" ? "向量" : type === "rerank" ? "重排" : "主") + "API地址。"); return; }
-        toast("拉取模型列表…");
-        var endpoint = buildEndpoint(url, "/models");
-        fetch(endpoint, {
-            headers: key ? { Authorization: "Bearer " + key } : {}
-        }).then(function(r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            return r.json();
-        }).then(function(data) {
-            var models = (data.data || data.models || []).map(function(m) {
-                return typeof m === "string" ? m : (m.id || m.name || "");
-            }).filter(Boolean);
-            globalApi[listField] = models;
-            saveGlobalApi();
-            toast("✓ 获取到 " + models.length + " 个模型。");
-            populateModelSelect(type);
-        }).catch(function(e) {
-            if (retryCount < MAX_RETRIES) {
-                var delay = (retryCount + 1) * 1500;
-                toast("⚠ 拉取失败，" + delay / 1000 + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")…");
-                setTimeout(function() { fetchModelList(type, retryCount + 1); }, delay);
-            } else {
-                toast("✗ 拉取模型列表最终失败: " + e.message);
-            }
-        });
+    function refreshWorlds() {
+        var container = document.getElementById("tlg-worlds-list"); if (!container) return;
+        var chatId = getCurrentChatId(), ids = Object.keys(worlds).sort(function (a, b) { return (worlds[b].updatedAt || 0) - (worlds[a].updatedAt || 0); });
+        if (!ids.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">万流归虚——尚无被观测的世界。</div>'; return; }
+        container.innerHTML = ids.map(function (wid) {
+            var w = worlds[wid], isCurrent = wid === currentWorldId, isLinked = w.chatId === chatId && chatId;
+            return '<div style="background:#050508;border:1px solid ' + (isCurrent ? "#ffffff" : "#2a2a3a") + ';border-radius:4px;padding:12px;margin-bottom:10px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<div style="font-size:14px;font-weight:600;color:#ffffff;">' + escHtml(w.name) + (isCurrent ? ' <span style="font-size:11px;color:#7a7a8a">(当前观测焦点)</span>' : "") + '</div>' +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-worlds-del" data-wid="' + wid + '" style="font-size:11px;padding:4px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div>' +
+                '<div style="font-size:11px;color:#7a7a8a;margin-top:4px;">刻度: ' + (w.nodes ? w.nodes.length : 0) + ' | 档案: ' + (w.summaries ? w.summaries.length : 0) + '</div>' +
+                '<div style="font-size:11px;color:#7a7a8a;">标识: ' + escHtml(w.chatId || "未关联") + '</div>' +
+                '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+                (!isCurrent && isLinked ? '<button type="button" class="tlg-btn tlg-btn-primary tlg-worlds-switch" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">聚焦于此</button>' : "") +
+                (!isLinked && !isCurrent ? '<button type="button" class="tlg-btn tlg-worlds-link" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">连接当前世界</button>' : "") +
+                '<button type="button" class="tlg-btn tlg-worlds-rename" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">重命名</button>' +
+                '<button type="button" class="tlg-btn tlg-worlds-export" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">提取源数据</button>' +
+                '</div></div>';
+        }).join("");
+        container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
+        container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
+        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖。"); }); });
+        container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
+        container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界。"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭。")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩。"); }); });
     }
 
-    function populateModelSelect(type) {
-        var selId, list, currentModel;
-        if (type === "vector") { selId = "tlg-vec-model-select"; list = globalApi.vectorModelList || []; currentModel = globalApi.vectorModel; }
-        else if (type === "rerank") { selId = "tlg-rerank-model-select"; list = globalApi.rerankModelList || []; currentModel = globalApi.rerankModel; }
-        else { selId = "tlg-model-select"; list = globalApi.modelList || []; currentModel = globalApi.model; }
-        var sel = document.getElementById(selId); if (!sel) return;
-        sel.innerHTML = '<option value="">-- 选择模型 --</option>' +
-            list.map(function(m) { return '<option value="' + escHtml(m) + '"' + (m === currentModel ? " selected" : "") + '>' + escHtml(m) + '</option>'; }).join("");
-        if (currentModel && list.indexOf(currentModel) === -1) {
-            sel.innerHTML += '<option value="' + escHtml(currentModel) + '" selected>' + escHtml(currentModel) + '</option>';
-        }
+    function importWorld() {
+        var input = document.createElement("input"); input.type = "file"; input.accept = ".json";
+        input.onchange = function () {
+            var file = input.files[0]; if (!file) return; var reader = new FileReader();
+            reader.onload = function () {
+                try {
+                    var data = JSON.parse(reader.result);
+                    if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据。"); return; }
+                    var wid = data.id || generateId(); if (worlds[wid]) wid = generateId();
+                    data.id = wid; if (!data.name) data.name = file.name.replace(/\.json$/, "");
+                    if (!data.createdAt) data.createdAt = Date.now(); data.updatedAt = Date.now();
+                    if (!data.pinnedPaths) data.pinnedPaths = [];
+                    worlds[wid] = data; saveWorlds(); refreshWorlds(); toast("连接建立: " + data.name);
+                } catch (e) { toast("维度侵入失败: " + e.message); }
+            }; reader.readAsText(file);
+        }; input.click();
     }
 
-    function testApiConnection(type) {
-        var url, key, label;
-        if (type === "vector") { url = (globalApi.vectorUrl || "").trim(); key = (globalApi.vectorKey || "").trim(); label = "向量API"; }
-        else if (type === "rerank") { url = (globalApi.rerankUrl || "").trim(); key = (globalApi.rerankKey || "").trim(); label = "重排API"; }
-        else { url = (globalApi.apiUrl || "").trim(); key = (globalApi.apiKey || "").trim(); label = "主API"; }
-        if (!url) { toast("请先填写" + label + "地址。"); return; }
-        toast("测试 " + label + " 连接…");
-        fetch(buildEndpoint(url, "/models"), {
-            headers: key ? { Authorization: "Bearer " + key } : {}
-        }).then(function(r) {
-            if (r.ok) toast("✓ " + label + " 连接成功。");
-            else toast("✗ " + label + " HTTP " + r.status);
-        }).catch(function(e) { toast("✗ " + label + " 连接失败: " + e.message); });
-    }
-
-    // ══════════════════════════════════════
-    // Tab 切换
-    // ══════════════════════════════════════
-    function switchTab(name) {
-        var panel = document.getElementById("tlg-panel"); if (!panel) return;
-        panel.querySelectorAll(".tlg-tab").forEach(function(t) { t.classList.toggle("active", t.dataset.tab === name); });
-        panel.querySelectorAll(".tlg-panel-view").forEach(function(p) { p.classList.remove("active"); });
-        var target = document.getElementById("tlg-view-" + name);
-        if (target) target.classList.add("active");
-        if (name === "tree") { setTimeout(function() { renderCanvas(); centerOnCurrentNode(); }, 50); }
-        else if (name === "archive") { refreshArchive(); }
-        else if (name === "summary") { refreshSummary(); }
-        else if (name === "engine") { populateModelSelect("main"); populateModelSelect("vector"); populateModelSelect("rerank"); }
-        else if (name === "worlds") { refreshWorlds(); }
-    }
-
-    // ══════════════════════════════════════
-    // 面板 HTML 构建
-    // ══════════════════════════════════════
     function ensurePanelBuilt() {
         if (document.getElementById("tlg-panel")) return;
-        var panel = document.createElement("div"); panel.id = "tlg-panel";
-        panel.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:#000000;z-index:99999;display:flex;flex-direction:column;font-family:'Segoe UI',sans-serif;color:#c0c0c8;overflow:hidden;";
-        panel.innerHTML =
-            // Tab bar
-            '<div style="display:flex;height:44px;border-bottom:1px solid #1a1a28;background:#050508;flex-shrink:0;overflow-x:auto;">' +
-                '<div class="tlg-tab active" data-tab="tree" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">🌿 命运分支线</div>' +
-                '<div class="tlg-tab" data-tab="archive" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">📁 观测坐标</div>' +
-                '<div class="tlg-tab" data-tab="summary" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">📝 因果档案</div>' +
-                '<div class="tlg-tab" data-tab="engine" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">⚙️ 引擎核心</div>' +
-                '<div class="tlg-tab" data-tab="worlds" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">🌐 诸世界</div>' +
-                '<div id="tlg-close-btn" style="margin-left:auto;padding:0 16px;display:flex;align-items:center;cursor:pointer;color:#6a6a78;font-size:18px;">✕</div>' +
-            '</div>' +
-            // Tab content
-            '<div style="flex:1;overflow:hidden;position:relative;">' +
-                // Tree
-                '<div class="tlg-panel-view active" id="tlg-view-tree" style="position:absolute;inset:0;display:none;flex-direction:row;">' +
-                    '<div id="tlg-canvas-wrap" style="flex:1;position:relative;overflow:hidden;">' +
-                        '<canvas id="tlg-tree-canvas" style="position:absolute;inset:0;width:100%;height:100%;cursor:grab;"></canvas>' +
-                        '<div style="position:absolute;top:12px;left:12px;display:flex;gap:8px;z-index:2;flex-wrap:wrap;">' +
-                            '<button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 锚定</button>' +
-                            '<button type="button" class="tlg-btn" id="tlg-canvas-reset" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⊙ 归位</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div id="tlg-brief-panel" style="width:0;background:#050508;border-left:1px solid #1a1a28;transition:width 0.3s;overflow:hidden;display:flex;flex-direction:column;">' +
-                        '<div class="tlg-brief-header" style="padding:14px 16px;border-bottom:1px solid #1a1a28;font-size:13px;font-weight:600;color:#e8e8f0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;"><span>节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div>' +
-                        '<div class="tlg-brief-body" style="flex:1;overflow-y:auto;padding:14px 16px;font-size:12px;line-height:1.7;"></div>' +
-                        '<div class="tlg-brief-footer" style="padding:10px 16px;border-top:1px solid #1a1a28;flex-shrink:0;"></div>' +
-                    '</div>' +
-                '</div>' +
-                // Archive
-                '<div class="tlg-panel-view" id="tlg-view-archive" style="position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;padding:16px;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">' +
-                        '<div style="font-size:14px;font-weight:600;color:#e8e8f0;">观测坐标</div>' +
-                        '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 新锚点</button>' +
-                    '</div>' +
-                    '<div id="tlg-pinned-paths" style="margin-bottom:14px;"></div>' +
-                    '<div id="tlg-archive-list"></div>' +
-                '</div>' +
-                // Summary
-                '<div class="tlg-panel-view" id="tlg-view-summary" style="position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;padding:16px;gap:14px;">' +
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">总结控制</div>' +
-                        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">' +
-                            '<span style="font-size:12px;color:#7a7a8a;">自动模式</span>' +
-                            '<div class="tlg-toggle ' + (globalApi.autoMode ? "on" : "") + '" id="tlg-auto-toggle" style="position:relative;width:36px;height:20px;background:#1a1a28;border-radius:10px;cursor:pointer;flex-shrink:0;"></div>' +
-                            '<span style="font-size:12px;color:#7a7a8a;margin-left:12px;">每</span>' +
-                            '<input class="tlg-input" id="tlg-auto-interval" type="number" min="1" max="100" value="' + (globalApi.autoInterval || 10) + '" style="width:50px;padding:4px 6px;" />' +
-                            '<span style="font-size:12px;color:#7a7a8a;">回合提醒</span>' +
-                        '</div>' +
-                        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">' +
-                            '<span style="font-size:12px;color:#7a7a8a;">跳转后保留最近</span>' +
-                            '<input class="tlg-input" id="tlg-last-n" type="number" min="1" max="100" value="' + (globalApi.lastNMessages || 5) + '" style="width:50px;padding:4px 6px;" />' +
-                            '<span style="font-size:12px;color:#7a7a8a;">条消息可见</span>' +
-                        '</div>' +
-                        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">' +
-                            '<span style="font-size:12px;color:#7a7a8a;">跳转前自动总结</span>' +
-                            '<div class="tlg-toggle ' + (globalApi.jumpSummary ? "on" : "") + '" id="tlg-jump-summary-toggle" style="position:relative;width:36px;height:20px;background:#1a1a28;border-radius:10px;cursor:pointer;flex-shrink:0;"></div>' +
-                        '</div>' +
-                        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">' +
-                            '<span style="font-size:12px;color:#7a7a8a;">手动总结条数</span>' +
-                            '<input class="tlg-input" id="tlg-manual-count" type="number" min="1" max="200" value="' + (globalApi.manualCount || 20) + '" style="width:50px;padding:4px 6px;" />' +
-                        '</div>' +
-                        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-                            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-manual-btn" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 手动总结</button>' +
-                            '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">📋 补全历史</button>' +
-                            '<button type="button" class="tlg-btn" id="tlg-summary-compress-btn" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🗜 压缩档案</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">总结提示词</div>' +
-                        '<label class="tlg-label" style="font-size:11px;color:#7a7a8a;margin-bottom:4px;display:block;">总结Prompt（用 {{context}} 代表对话内容）</label>' +
-                        '<textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:140px;font-size:11px;">' + escHtml(globalApi.summaryPrompt) + '</textarea>' +
-                        '<label class="tlg-label" style="font-size:11px;color:#7a7a8a;margin-top:10px;margin-bottom:4px;display:block;">压缩Prompt（用 {{context}} 代表档案内容）</label>' +
-                        '<textarea class="tlg-textarea" id="tlg-compress-prompt" style="min-height:80px;font-size:11px;">' + escHtml(globalApi.compressPrompt) + '</textarea>' +
-                        '<label class="tlg-label" style="font-size:11px;color:#7a7a8a;margin-top:10px;margin-bottom:4px;display:block;">路径摘要Prompt（用 {{context}} 代表路径信息）</label>' +
-                        '<textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px;font-size:11px;">' + escHtml(globalApi.pathSummaryPrompt) + '</textarea>' +
-                        '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-save-prompts" style="margin-top:10px;width:100%;">保存提示词</button>' +
-                    '</div>' +
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">因果档案列表</div>' +
-                        '<div id="tlg-summary-list"></div>' +
-                    '</div>' +
-                '</div>' +
-                // Engine
-                '<div class="tlg-panel-view" id="tlg-view-engine" style="position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;padding:16px;gap:14px;">' +
-                    // 主API
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">🔮 主API（总结/路径生成）</div>' +
-                        '<label class="tlg-label">API 地址</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:8px;"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(globalApi.apiUrl) + '" style="flex:1;" /><button type="button" class="tlg-btn" id="tlg-test-main-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">测试</button></div>' +
-                        '<label class="tlg-label">API Key</label>' +
-                        '<input class="tlg-input" id="tlg-api-key" type="password" placeholder="sk-…" value="' + escHtml(globalApi.apiKey) + '" style="margin-bottom:8px;" />' +
-                        '<label class="tlg-label">模型</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:6px;"><select class="tlg-select" id="tlg-model-select" style="flex:1;"></select><button type="button" class="tlg-btn" id="tlg-fetch-main-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">拉取列表</button></div>' +
-                        '<input class="tlg-input" id="tlg-model-manual" placeholder="或手动输入模型名" value="' + escHtml(globalApi.model) + '" />' +
-                    '</div>' +
-                    // 向量API
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">🧲 向量API（嵌入/检索）</div>' +
-                        '<label class="tlg-label">向量API 地址</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:8px;"><input class="tlg-input" id="tlg-vec-url" placeholder="https://api.openai.com" value="' + escHtml(globalApi.vectorUrl) + '" style="flex:1;" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">测试</button></div>' +
-                        '<label class="tlg-label">向量API Key</label>' +
-                        '<input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(globalApi.vectorKey) + '" style="margin-bottom:8px;" />' +
-                        '<label class="tlg-label">嵌入模型</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:6px;"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1;"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">拉取列表</button></div>' +
-                        '<input class="tlg-input" id="tlg-vec-model-manual" placeholder="text-embedding-ada-002" value="' + escHtml(globalApi.vectorModel) + '" style="margin-bottom:8px;" />' +
-                        '<label class="tlg-label">召回数量 (Top-K)</label>' +
-                        '<input class="tlg-input" id="tlg-vec-topk" type="number" min="1" max="50" value="' + (globalApi.vectorTopK || 8) + '" style="width:80px;margin-bottom:8px;" />' +
-                        '<label class="tlg-label">检索注入Prompt（用 {{context}} 代表检索结果）</label>' +
-                        '<textarea class="tlg-textarea" id="tlg-vec-prompt" style="min-height:100px;font-size:11px;">' + escHtml(globalApi.vectorPrompt) + '</textarea>' +
-                    '</div>' +
-                    // 重排API
-                    '<div style="background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:14px;">' +
-                        '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:10px;">🔄 重排API（Rerank）</div>' +
-                        '<div style="font-size:11px;color:#7a7a8a;margin-bottom:10px;">可选。对向量召回结果进行二次排序，提升相关性。</div>' +
-                        '<label class="tlg-label">重排API 地址</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:8px;"><input class="tlg-input" id="tlg-rerank-url" placeholder="https://api.cohere.com" value="' + escHtml(globalApi.rerankUrl) + '" style="flex:1;" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">测试</button></div>' +
-                        '<label class="tlg-label">重排API Key</label>' +
-                        '<input class="tlg-input" id="tlg-rerank-key" type="password" value="' + escHtml(globalApi.rerankKey) + '" style="margin-bottom:8px;" />' +
-                        '<label class="tlg-label">重排模型</label>' +
-                        '<div style="display:flex;gap:8px;margin-bottom:6px;"><select class="tlg-select" id="tlg-rerank-model-select" style="flex:1;"></select><button type="button" class="tlg-btn" id="tlg-fetch-rerank-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">拉取列表</button></div>' +
-                        '<input class="tlg-input" id="tlg-rerank-model-manual" placeholder="rerank-multilingual-v3.0" value="' + escHtml(globalApi.rerankModel) + '" style="margin-bottom:8px;" />' +
-                        '<label class="tlg-label">重排后保留数量 (Top-N)</label>' +
-                        '<input class="tlg-input" id="tlg-rerank-topn" type="number" min="1" max="20" value="' + (globalApi.rerankTopN || 3) + '" style="width:80px;" />' +
-                    '</div>' +
-                    // 保存按钮
-                    '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%;padding:12px;font-size:13px;">💾 保存所有引擎设置</button>' +
-                '</div>' +
-                // Worlds
-                '<div class="tlg-panel-view" id="tlg-view-worlds" style="position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;padding:16px;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">' +
-                        '<div style="font-size:14px;font-weight:600;color:#e8e8f0;">诸世界</div>' +
-                        '<div style="display:flex;gap:8px;">' +
-                            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-worlds-create" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✦ 创建新世界</button>' +
-                            '<button type="button" class="tlg-btn" id="tlg-worlds-import" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">↑ 导入世界</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div id="tlg-worlds-list"></div>' +
-                '</div>' +
-            '</div>';
+        var s = globalApi; var panel = document.createElement("div"); panel.id = "tlg-panel";
+        panel.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;height:100dvh;background:#000000;color:#e8e8f0;z-index:2147483647;flex-direction:column;font-family:-apple-system,sans-serif;overflow:hidden;";
 
-        document.body.appendChild(panel);
-        injectPanelStyles();
-        bindPanelEvents(panel);
+        var summaryTabHtml =
+            '<div class="tlg-view" data-view="summary"><div class="tlg-scroll-panel">' +
+            '<div class="tlg-section"><div class="tlg-section-title">自动化切片协议</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自律模式（按步数）</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 步自动触发</label></div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">手动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 步</label></div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">自动浓缩</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">档案满时自动浓缩</span><div class="tlg-toggle ' + (s.autoCompress ? "on" : "") + '" id="tlg-auto-compress-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条 · 每批浓缩 <input class="tlg-input" id="tlg-compress-batch" type="number" min="2" value="' + (s.compressBatchSize || 10) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">记录仪指令</div>' +
+            '<label class="tlg-label">总结提示词（{{context}}）</label><textarea class="tlg-textarea" id="tlg-summary-prompt" style="min-height:100px">' + escHtml(s.summaryPrompt || "") + '</textarea></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">最新档案</div><div id="tlg-summary-list"></div></div>' +
+            '</div></div>';
+
+        var vaultTabHtml =
+            '<div class="tlg-view" data-view="vault"><div class="tlg-scroll-panel"><div id="tlg-vault-container"></div></div></div>';
+
+        panel.innerHTML =
+            '<div id="tlg-tabs">' +
+            '<div class="tlg-tab active" data-tab="tree">命运分支线</div>' +
+            '<div class="tlg-tab" data-tab="archive">观测坐标</div>' +
+            '<div class="tlg-tab" data-tab="summary">因果档案</div>' +
+            '<div class="tlg-tab" data-tab="vault">观测档案库</div>' +
+            '<div class="tlg-tab" data-tab="worlds">诸世界</div>' +
+            '<div class="tlg-tab" data-tab="engine">引擎核心</div>' +
+            '<div id="tlg-close">✕</div></div><div id="tlg-body">' +
+            // 命运分支线
+            '<div class="tlg-view active" id="tlg-view-tree" data-view="tree"><div id="tlg-canvas-wrap"><canvas id="tlg-tree-canvas"></canvas>' +
+            '<div id="tlg-canvas-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;z-index:2;">' +
+            '<button type="button" class="tlg-btn" id="tlg-canvas-anchor" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 凝固当前状态</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-canvas-center-cur" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">◎ 定位当前</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-canvas-reset-view" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">视角归位</button>' +
+            '</div></div>' +
+            '<div id="tlg-brief-panel"><div class="tlg-brief-header"><span>因果节点</span><button type="button" class="tlg-btn" id="tlg-brief-close" style="padding:2px 8px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕</button></div><div class="tlg-brief-body"></div><div class="tlg-brief-footer"></div></div></div>' +
+            // 观测坐标
+            '<div class="tlg-view" data-view="archive"><div class="tlg-scroll-panel">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">' +
+            '<div style="font-size:15px;font-weight:600;color:#ffffff;">全部锚定坐标</div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-archive-new" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⚓ 建立新坐标</button></div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;">常用路径</div>' +
+            '<div id="tlg-pinned-paths" style="margin-bottom:12px;"></div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;border-top:1px solid #1e1e2a;padding-top:10px;">全部节点</div>' +
+            '<div id="tlg-archive-list"></div></div></div>' +
+            // 因果档案
+            summaryTabHtml +
+            // 观测档案库
+            vaultTabHtml +
+            // 诸世界
+            '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">' +
+            '<div style="font-size:15px;font-weight:600;color:#ffffff;">维度图谱</div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-worlds-import" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">凝望异世界</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-worlds-create" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✦ 创建新世界</button></div>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">当前实体连接: ' + escHtml(getCurrentChatId() || "未知") + (currentWorldId ? " → " + escHtml((worlds[currentWorldId] || {}).name || "") : " (未建立)") + '</div>' +
+            '<div id="tlg-worlds-list"></div></div></div>' +
+            // 引擎核心
+            '<div class="tlg-view" data-view="engine"><div class="tlg-scroll-panel">' +
+            '<div class="tlg-section"><div class="tlg-section-title">主解析引擎</div>' +
+            '<label class="tlg-label">连接端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-api-url" placeholder="https://api.openai.com" value="' + escHtml(s.apiUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">认证密钥</label><input class="tlg-input" id="tlg-api-key" type="password" value="' + escHtml(s.apiKey || "") + '" style="margin-bottom:10px" />' +
+            '<label class="tlg-label">演算核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-model-manual" value="' + escHtml(s.model || "") + '" /></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">联想网络（辅助引擎）</div>' +
+            '<label class="tlg-label">向量端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-vec-url" value="' + escHtml(s.vectorUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-vec-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">向量密钥</label><input class="tlg-input" id="tlg-vec-key" type="password" value="' + escHtml(s.vectorKey || "") + '" style="margin-bottom:10px" />' +
+            '<label class="tlg-label">降维核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-vec-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-vec-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-vec-model" value="' + escHtml(s.vectorModel || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">联想提示词</label><textarea class="tlg-textarea" id="tlg-vec-prompt">' + escHtml(s.vectorPrompt || "") + '</textarea>' +
+            '<label class="tlg-label">召回数量 (Top-K)</label><input class="tlg-input" id="tlg-vec-topk" type="number" min="1" max="50" value="' + (s.vectorTopK || 8) + '" style="width:80px;margin-bottom:10px" /></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">重排引擎（Rerank，可选）</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量召回结果二次排序，提升相关性。留空则跳过重排。</div>' +
+            '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">重排密钥</label><input class="tlg-input" id="tlg-rerank-key" type="password" value="' + escHtml(s.rerankKey || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">重排核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-rerank-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-rerank-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
+            '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">重排后保留数量 (Top-N)</label><input class="tlg-input" id="tlg-rerank-topn" type="number" min="1" max="20" value="' + (s.rerankTopN || 3) + '" style="width:80px" /></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">提示词配置</div>' +
+            '<label class="tlg-label">浓缩指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-compress-prompt" style="min-height:80px">' + escHtml(s.compressPrompt || "") + '</textarea>' +
+            '<label class="tlg-label">路径摘要指令（{{context}}）</label><textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px">' + escHtml(s.pathSummaryPrompt || "") + '</textarea></div>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-engine-save" style="width:100%!important;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">锁定核心配置</button>' +
+            '</div></div></div>';
+
+        document.body.appendChild(panel); bindPanelEvents(panel);
     }
 
-    function injectPanelStyles() {
-        if (document.getElementById("tlg-styles")) return;
-        var style = document.createElement("style"); style.id = "tlg-styles";
-        style.textContent = [
-            '.tlg-tab.active { color:#e8e8f0!important; border-bottom-color:#c0c0c8!important; background:#0a0a14!important; }',
-            '.tlg-panel-view.active { display:flex!important; }',
-            '.tlg-input,.tlg-textarea,.tlg-select { width:100%;padding:8px 10px;background:#0a0a14;border:1px solid #1a1a28;border-radius:4px;color:#c0c0c8;font-size:12px;outline:none; }',
-            '.tlg-input:focus,.tlg-textarea:focus,.tlg-select:focus { border-color:#4a4a5a; }',
-            '.tlg-textarea { resize:vertical;min-height:60px;line-height:1.6;font-family:Consolas,Monaco,monospace; }',
-            '.tlg-label { display:block;font-size:11px;color:#7a7a8a;margin-bottom:4px; }',
-            '.tlg-btn { padding:6px 12px;border:1px solid #2a2a3a;background:#0a0a14;color:#c0c0c8;border-radius:4px;cursor:pointer;font-size:11px;transition:all 0.2s;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto; }',
-            '.tlg-btn:hover { border-color:#5a5a6a;background:#12121e; }',
-            '.tlg-btn:disabled { opacity:0.4;cursor:not-allowed; }',
-            '.tlg-btn-primary { background:rgba(192,192,200,0.08);border-color:#4a4a5a; }',
-            '.tlg-btn-primary:hover { background:rgba(192,192,200,0.15);border-color:#8a8a9a; }',
-            '.tlg-btn-danger { border-color:#aa4444;color:#aa4444; }',
-            '.tlg-btn-danger:hover { background:rgba(170,68,68,0.12); }',
-            '.tlg-btn-jump { width:100%;padding:10px;background:rgba(192,192,200,0.06);border:1px solid #4a4a5a;color:#e8e8f0;font-size:12px;font-weight:500; }',
-            '.tlg-btn-jump:hover { background:rgba(192,192,200,0.14);border-color:#8a8a9a;box-shadow:0 0 10px rgba(192,192,200,0.15); }',
-            '.tlg-toggle { position:relative;width:36px;height:20px;background:#1a1a28;border-radius:10px;cursor:pointer;transition:background 0.2s;flex-shrink:0; }',
-            '.tlg-toggle::after { content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;background:#c0c0c8;border-radius:50%;transition:transform 0.2s; }',
-            '.tlg-toggle.on { background:#5a5a8a; }',
-            '.tlg-toggle.on::after { transform:translateX(16px); }',
-            '.tlg-archive-card { background:#050508;border:1px solid #1a1a28;border-radius:4px;padding:12px 14px;margin-bottom:10px;transition:all 0.2s; }',
-            '.tlg-archive-card:hover { border-color:#3a3a4a; }',
-            '.tlg-archive-card.current { border-color:#6a6a8a;box-shadow:0 0 8px rgba(192,192,200,0.1); }',
-            '.tlg-archive-title { font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:4px; }',
-            '.tlg-archive-meta { font-size:11px;color:#5a5a6a;margin-bottom:4px; }',
-            '.tlg-archive-brief { font-size:12px;color:#8a8a9a;line-height:1.5; }',
-            '.tlg-modal { background:#0a0a14;border:1px solid #2a2a3a;border-radius:6px;padding:20px;width:420px;max-width:90vw;box-shadow:0 0 40px rgba(0,0,0,0.8); }',
-            '.tlg-modal-title { font-size:15px;font-weight:600;color:#e8e8f0;margin-bottom:14px; }',
-            '.tlg-modal-actions { display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap; }',
-            '#tlg-brief-panel.open { width:340px; }',
-            '#tlg-panel *::-webkit-scrollbar { width:5px; }',
-            '#tlg-panel *::-webkit-scrollbar-track { background:transparent; }',
-            '#tlg-panel *::-webkit-scrollbar-thumb { background:#2a2a3a;border-radius:3px; }',
-        ].join("\n");
-        document.head.appendChild(style);
+    function openPanel() {
+        if (!isEnabled()) { toast("观测台已关闭，请解除权限限制。"); return; }
+        loadCurrentWorld(); migrateOldData();
+        var existingPanel = document.getElementById("tlg-panel"); if (existingPanel) existingPanel.remove();
+        ensurePanelBuilt(); var panel = document.getElementById("tlg-panel"); if (!panel) return;
+        panel.style.display = "flex"; document.body.style.overflow = "hidden";
+        (function animLoop() {
+            var p = document.getElementById("tlg-panel"); if (!p || p.style.display !== "flex") return;
+            renderCanvas(); requestAnimationFrame(animLoop);
+        })();
+    }
+    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; }
+
+    function switchTab(name) {
+        var panel = document.getElementById("tlg-panel"); if (!panel) return;
+        panel.querySelectorAll(".tlg-tab").forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-tab") === name); });
+        panel.querySelectorAll(".tlg-view").forEach(function (v) { var on = v.getAttribute("data-view") === name; v.classList.toggle("active", on); v.style.display = on ? "flex" : "none"; });
+        if (name === "tree") { /* animLoop handles render */ }
+        else if (name === "archive") refreshArchive();
+        else if (name === "summary") refreshSummary();
+        else if (name === "vault") refreshVault();
+        else if (name === "worlds") refreshWorlds();
+        else if (name === "engine") { populateModelSelect(); populateVectorModelSelect(); populateRerankModelSelect(); }
     }
 
     function bindPanelEvents(panel) {
-        // Close
-        document.getElementById("tlg-close-btn").onclick = function() { closePanel(); };
+        document.getElementById("tlg-close").onclick = closePanel;
+        panel.querySelectorAll(".tlg-tab").forEach(function (tab) { tab.onclick = function () { switchTab(tab.getAttribute("data-tab")); }; });
+        document.getElementById("tlg-brief-close").onclick = closeBriefPanel;
+        document.getElementById("tlg-canvas-anchor").onclick = function () { showAnchorModal(); };
+        document.getElementById("tlg-canvas-center-cur").onclick = function () { centerOnCurrentNode(); };
+        document.getElementById("tlg-canvas-reset-view").onclick = function () { camX = 0; camY = 0; camZoom = 1; };
+        document.getElementById("tlg-archive-new").onclick = function () { showAnchorModal(); };
+        document.getElementById("tlg-worlds-import").addEventListener("click", importWorld);
+        document.getElementById("tlg-worlds-create").addEventListener("click", createNewWorldManual);
 
-        // Tabs
-        panel.querySelectorAll(".tlg-tab").forEach(function(tab) {
-            tab.onclick = function() { switchTab(tab.dataset.tab); };
-        });
+        document.getElementById("tlg-auto-toggle").addEventListener("click", function () { globalApi.autoMode = !globalApi.autoMode; this.classList.toggle("on", globalApi.autoMode); saveGlobalApi(); });
+        document.getElementById("tlg-auto-interval").addEventListener("change", function () { globalApi.autoInterval = Math.max(1, parseInt(this.value, 10) || 10); saveGlobalApi(); });
+        document.getElementById("tlg-jump-summary-toggle").addEventListener("click", function () { globalApi.jumpSummary = !globalApi.jumpSummary; this.classList.toggle("on", globalApi.jumpSummary); saveGlobalApi(); });
+        document.getElementById("tlg-last-n").addEventListener("change", function () { globalApi.lastNMessages = Math.max(1, parseInt(this.value, 10) || 5); saveGlobalApi(); });
+        document.getElementById("tlg-manual-count").addEventListener("change", function () { globalApi.manualCount = Math.max(1, parseInt(this.value, 10) || 20); saveGlobalApi(); });
+        document.getElementById("tlg-summary-max").addEventListener("change", function () { globalApi.summaryMaxCount = Math.max(10, parseInt(this.value, 10) || 100); saveGlobalApi(); });
+        document.getElementById("tlg-auto-compress-toggle").addEventListener("click", function () { globalApi.autoCompress = !globalApi.autoCompress; this.classList.toggle("on", globalApi.autoCompress); saveGlobalApi(); });
+        document.getElementById("tlg-compress-batch").addEventListener("change", function () { globalApi.compressBatchSize = Math.max(2, parseInt(this.value, 10) || 10); saveGlobalApi(); });
+        document.getElementById("tlg-summary-prompt").addEventListener("change", function () { globalApi.summaryPrompt = this.value; saveGlobalApi(); });
+        document.getElementById("tlg-summary-run").addEventListener("click", function () { flashBtn(this); runSummary(false); });
 
-        // Brief panel
-        document.getElementById("tlg-brief-close").onclick = function() { closeBriefPanel(); };
-
-        // Tree buttons
-        document.getElementById("tlg-canvas-anchor").onclick = function() { showAnchorModal(); };
-        document.getElementById("tlg-canvas-reset").onclick = function() { camX = 0; camY = 0; camZoom = 1; centerOnCurrentNode(); renderCanvas(); };
-
-        // Archive
-        document.getElementById("tlg-archive-new").onclick = function() { showAnchorModal(); };
-
-        // Summary controls
-        document.getElementById("tlg-auto-toggle").onclick = function() {
-            globalApi.autoMode = !globalApi.autoMode;
-            this.classList.toggle("on", globalApi.autoMode); saveGlobalApi();
-        };
-        document.getElementById("tlg-jump-summary-toggle").onclick = function() {
-            globalApi.jumpSummary = !globalApi.jumpSummary;
-            this.classList.toggle("on", globalApi.jumpSummary); saveGlobalApi();
-        };
-        document.getElementById("tlg-auto-interval").onchange = function() {
-            globalApi.autoInterval = Math.max(1, parseInt(this.value) || 10); saveGlobalApi();
-        };
-        document.getElementById("tlg-last-n").onchange = function() {
-            globalApi.lastNMessages = Math.max(1, parseInt(this.value) || 5); saveGlobalApi();
-        };
-        document.getElementById("tlg-manual-count").onchange = function() {
-            globalApi.manualCount = Math.max(1, parseInt(this.value) || 20); saveGlobalApi();
-        };
-        document.getElementById("tlg-summary-manual-btn").onclick = function() { runManualSummary(); };
-        document.getElementById("tlg-summary-catchup-btn").onclick = function() { runCatchupSummary(); };
-        document.getElementById("tlg-summary-compress-btn").onclick = function() { compressSummaries(); };
-
-        // Prompt save
-        document.getElementById("tlg-save-prompts").onclick = function() {
-            globalApi.summaryPrompt = document.getElementById("tlg-summary-prompt").value;
-            globalApi.compressPrompt = document.getElementById("tlg-compress-prompt").value;
-            globalApi.pathSummaryPrompt = document.getElementById("tlg-path-summary-prompt").value;
-            saveGlobalApi(); toast("✓ 提示词已保存。"); flashBtn(this);
-        };
-
-        // Engine events
-        document.getElementById("tlg-test-main-api").onclick = function() { testApiConnection("main"); };
-        document.getElementById("tlg-test-vec-api").onclick = function() { testApiConnection("vector"); };
-        document.getElementById("tlg-test-rerank-api").onclick = function() { testApiConnection("rerank"); };
-        document.getElementById("tlg-fetch-main-models").onclick = function() { fetchModelList("main"); };
-        document.getElementById("tlg-fetch-vec-models").onclick = function() { fetchModelList("vector"); };
-        document.getElementById("tlg-fetch-rerank-models").onclick = function() { fetchModelList("rerank"); };
-
-        // Model select sync
-        document.getElementById("tlg-model-select").onchange = function() {
-            if (this.value) document.getElementById("tlg-model-manual").value = this.value;
-        };
-        document.getElementById("tlg-vec-model-select").onchange = function() {
-            if (this.value) document.getElementById("tlg-vec-model-manual").value = this.value;
-        };
-        document.getElementById("tlg-rerank-model-select").onchange = function() {
-            if (this.value) document.getElementById("tlg-rerank-model-manual").value = this.value;
-        };
-
-        // Engine save
-        document.getElementById("tlg-engine-save").onclick = function() {
+        document.getElementById("tlg-engine-save").addEventListener("click", function () {
+            flashBtn(this);
             globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim();
             globalApi.apiKey = document.getElementById("tlg-api-key").value.trim();
-            globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value;
             globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
             globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
-            globalApi.vectorModel = document.getElementById("tlg-vec-model-manual").value.trim() || document.getElementById("tlg-vec-model-select").value;
-            globalApi.vectorTopK = Math.max(1, parseInt(document.getElementById("tlg-vec-topk").value) || 8);
+            globalApi.vectorModel = document.getElementById("tlg-vec-model").value.trim() || document.getElementById("tlg-vec-model-select").value;
             globalApi.vectorPrompt = document.getElementById("tlg-vec-prompt").value;
+            globalApi.model = document.getElementById("tlg-model-manual").value.trim() || document.getElementById("tlg-model-select").value;
+            globalApi.compressPrompt = document.getElementById("tlg-compress-prompt").value;
+            globalApi.pathSummaryPrompt = document.getElementById("tlg-path-summary-prompt").value;
+            globalApi.vectorTopK = Math.max(1, parseInt(document.getElementById("tlg-vec-topk").value) || 8);
             globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim();
             globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim();
-            globalApi.rerankModel = document.getElementById("tlg-rerank-model-manual").value.trim() || document.getElementById("tlg-rerank-model-select").value;
+            globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
             globalApi.rerankTopN = Math.max(1, parseInt(document.getElementById("tlg-rerank-topn").value) || 3);
-            saveGlobalApi();
-            toast("✓ 引擎设置已保存。"); flashBtn(this);
-        };
-
-        // Worlds
-        document.getElementById("tlg-worlds-create").onclick = function() { createNewWorldManual(); };
-        document.getElementById("tlg-worlds-import").onclick = function() { importWorld(); };
-
-        // Canvas events
+            saveGlobalApi(); toast("引擎设置已锚定。");
+        });
+        document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
+        document.getElementById("tlg-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-model-manual").value = this.value; });
+        document.getElementById("tlg-vec-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-vec-model").value = this.value; });
+        document.getElementById("tlg-fetch-vec-models").addEventListener("click", function () { flashBtn(this); globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim(); globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim(); saveGlobalApi(); fetchVectorModelList(); });
+        document.getElementById("tlg-test-api").addEventListener("click", function () {
+            var url = document.getElementById("tlg-api-url").value.trim(), key = document.getElementById("tlg-api-key").value.trim();
+            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+        });
+        document.getElementById("tlg-test-vec-api").addEventListener("click", function () {
+            var url = document.getElementById("tlg-vec-url").value.trim(), key = document.getElementById("tlg-vec-key").value.trim();
+            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送辅助探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 辅助节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+        });
+        document.getElementById("tlg-test-rerank-api").addEventListener("click", function () {
+            var url = document.getElementById("tlg-rerank-url").value.trim(), key = document.getElementById("tlg-rerank-key").value.trim();
+            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送重排探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 重排节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+        });
+        document.getElementById("tlg-fetch-rerank-models").addEventListener("click", function () { flashBtn(this); globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim(); globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim(); saveGlobalApi(); fetchRerankModelList(); });
+        document.getElementById("tlg-rerank-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-rerank-model").value = this.value; });
         initCanvasEvents();
     }
 
     function initCanvasEvents() {
         var wrap = document.getElementById("tlg-canvas-wrap"); if (!wrap) return;
-        canvas = document.getElementById("tlg-tree-canvas");
-        ctx = canvas.getContext("2d");
-
-        canvas.addEventListener("mousedown", function(e) {
-            if (e.button !== 0) return;
-            var hit = canvasHitTest(e.clientX, e.clientY);
-            if (hit) { openBriefPanel(hit); triggerRipple(0, 0); renderCanvas(); return; }
+        canvas = document.getElementById("tlg-tree-canvas"); ctx = canvas.getContext("2d");
+        if (typeof ResizeObserver !== "undefined") { new ResizeObserver(function () {}).observe(wrap); }
+        canvas.addEventListener("mousedown", function (e) {
+            if (e.button !== 0) return; var hit = canvasHitTest(e.clientX, e.clientY);
+            if (hit) {
+                var rct = canvas.getBoundingClientRect();
+                var wx = (e.clientX - rct.left - rct.width / 2 - camX) / camZoom;
+                var wy = (e.clientY - rct.top - rct.height / 2 - camY) / camZoom;
+                triggerRipple(wx, wy); openBriefPanel(hit); return;
+            }
             isPanning = true; panStartX = e.clientX - camX; panStartY = e.clientY - camY;
-            canvas.style.cursor = "grabbing";
         });
-        canvas.addEventListener("mousemove", function(e) {
-            if (!isPanning) return;
-            camX = e.clientX - panStartX; camY = e.clientY - panStartY; renderCanvas();
-        });
-        canvas.addEventListener("mouseup", function() { isPanning = false; canvas.style.cursor = "grab"; });
-        canvas.addEventListener("mouseleave", function() { isPanning = false; canvas.style.cursor = "grab"; });
-        canvas.addEventListener("wheel", function(e) {
-            e.preventDefault();
-            var factor = e.deltaY < 0 ? 1.12 : 0.89;
-            camZoom = Math.max(0.15, Math.min(5, camZoom * factor)); renderCanvas();
-        }, { passive: false });
-
-        // Touch
-        var lastTouchDist = 0;
-        canvas.addEventListener("touchstart", function(e) {
-            if (e.touches.length === 1) {
-                var hit = canvasHitTest(e.touches[0].clientX, e.touches[0].clientY);
-                if (hit) { openBriefPanel(hit); renderCanvas(); return; }
-                isPanning = true; panStartX = e.touches[0].clientX - camX; panStartY = e.touches[0].clientY - camY;
-            } else if (e.touches.length === 2) {
-                isPanning = false;
-                lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-            }
+        canvas.addEventListener("mousemove", function (e) { if (!isPanning) return; camX = e.clientX - panStartX; camY = e.clientY - panStartY; });
+        function endPan() { isPanning = false; }
+        canvas.addEventListener("mouseup", endPan); canvas.addEventListener("mouseleave", endPan);
+        canvas.addEventListener("wheel", function (e) { e.preventDefault(); camZoom = Math.max(0.2, Math.min(4, camZoom * (e.deltaY < 0 ? 1.1 : 0.91))); }, { passive: false });
+        var lastTouchDist = 0, touchStartHit = null, touchMoved = false;
+        canvas.addEventListener("touchstart", function (e) {
+            touchMoved = false;
+            if (e.touches.length === 1) { isPanning = true; panStartX = e.touches[0].clientX - camX; panStartY = e.touches[0].clientY - camY; touchStartHit = canvasHitTest(e.touches[0].clientX, e.touches[0].clientY); }
+            else if (e.touches.length === 2) { isPanning = false; lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
         }, { passive: true });
-        canvas.addEventListener("touchmove", function(e) {
-            if (e.touches.length === 1 && isPanning) {
-                camX = e.touches[0].clientX - panStartX; camY = e.touches[0].clientY - panStartY; renderCanvas();
-            } else if (e.touches.length === 2) {
-                var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                if (lastTouchDist > 0) { camZoom = Math.max(0.15, Math.min(5, camZoom * (dist / lastTouchDist))); renderCanvas(); }
-                lastTouchDist = dist;
-            }
+        canvas.addEventListener("touchmove", function (e) {
+            touchMoved = true;
+            if (e.touches.length === 1 && isPanning) { camX = e.touches[0].clientX - panStartX; camY = e.touches[0].clientY - panStartY; }
+            else if (e.touches.length === 2) { var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (lastTouchDist > 0) { camZoom = Math.max(0.2, Math.min(4, camZoom * (dist / lastTouchDist))); } lastTouchDist = dist; }
         }, { passive: true });
-        canvas.addEventListener("touchend", function() { isPanning = false; }, { passive: true });
-
-        // Animation loop
-        function animLoop() {
-            if (document.getElementById("tlg-panel")) { renderCanvas(); requestAnimationFrame(animLoop); }
-        }
-        requestAnimationFrame(animLoop);
-    }
-
-    // ══════════════════════════════════════
-    // 打开/关闭面板
-    // ══════════════════════════════════════
-    function openPanel() {
-        if (!isEnabled()) { toast("河岸凝视已关闭。请在菜单中启用。"); return; }
-        loadCurrentWorld(); migrateOldData(); ensureWorldExists();
-        ensurePanelBuilt();
-        switchTab("tree");
-        setTimeout(function() { centerOnCurrentNode(); renderCanvas(); refreshArchive(); }, 100);
-    }
-
-    function closePanel() {
-        var panel = document.getElementById("tlg-panel"); if (panel) panel.remove();
-        canvas = null; ctx = null; document.body.style.overflow = "";
-    }
-
-    // ══════════════════════════════════════
-    // 菜单按钮注入
-    // ══════════════════════════════════════
-       function injectMenuButton() {
-        var BTN_ID = "tlg-menu-btn";
-        var existing = document.getElementById(BTN_ID);
-        if (existing) {
-            // 已存在，只更新开关状态，不重建
-            var toggle = existing.querySelector("#tlg_enable_toggle");
-            if (toggle) toggle.classList.toggle("on", isEnabled());
-            return;
-        }
-
-        var targets = ["#extensionsMenu", "#extensionMenuItems", "#extension_menu", ".extensions_block"];
-        var container = null;
-        for (var i = 0; i < targets.length; i++) {
-            container = document.querySelector(targets[i]);
-            if (container) break;
-        }
-        if (!container) return;
-
-        var btn = document.createElement("div"); btn.id = BTN_ID;
-        btn.style.cssText = "cursor:pointer;padding:6px 10px;font-size:12px;color:#c0c0c8;display:flex;align-items:center;gap:6px;white-space:nowrap;border-radius:4px;transition:background 0.2s;";
-        var enabled = isEnabled();
-        btn.innerHTML = '<span style="font-size:15px;">🌊</span> <span>河岸凝视</span>' +
-            '<div id="tlg_enable_toggle" class="tlg-toggle ' + (enabled ? "on" : "") + '" style="position:relative;width:28px;height:14px;background:#1a1a28;border-radius:7px;cursor:pointer;margin-left:6px;flex-shrink:0;"></div>';
-        btn.onmouseenter = function() { btn.style.background = "rgba(255,255,255,0.04)"; };
-        btn.onmouseleave = function() { btn.style.background = ""; };
-        btn.onclick = function(e) {
-            if (e.target.id === "tlg_enable_toggle" || (e.target.parentElement && e.target.parentElement.id === "tlg_enable_toggle")) {
-                e.stopPropagation(); setEnabled(!isEnabled()); return;
+        canvas.addEventListener("touchend", function (e) {
+            if (!touchMoved && touchStartHit) {
+                var rct = canvas.getBoundingClientRect();
+                var wx = (e.changedTouches[0].clientX - rct.left - rct.width / 2 - camX) / camZoom;
+                var wy = (e.changedTouches[0].clientY - rct.top - rct.height / 2 - camY) / camZoom;
+                triggerRipple(wx, wy); openBriefPanel(touchStartHit);
             }
-            var panel = document.getElementById("tlg-panel");
-            if (panel) closePanel(); else openPanel();
-        };
-        container.appendChild(btn);
-
-        // 也注入 toggle 样式
-        injectPanelStyles();
+            isPanning = false; touchStartHit = null;
+        }, { passive: true });
     }
 
-    // ══════════════════════════════════════
-    // 斜杠命令
-    // ══════════════════════════════════════
+    function injectMenuButton() {
+        if (!isEnabled()) { var old = document.getElementById("tlg-menu-btn"); if (old) old.remove(); return; }
+        var menu = document.getElementById("extensionsMenu"); if (!menu) return; if (document.getElementById("tlg-menu-btn")) return;
+        var btn = document.createElement("div"); btn.id = "tlg-menu-btn"; btn.className = "list-group-item flex-container flexGap5 interactable"; btn.style.cursor = "pointer";
+        btn.innerHTML = '<i class="fa-solid fa-water" style="color:#ffffff;text-shadow:0 0 4px rgba(0,0,0,0.8);"></i><span style="color:#ffffff;font-weight:900;text-shadow:1px 1px 3px #000000,0 0 8px rgba(0,0,0,0.6);letter-spacing:1px;">河岸凝视</span>';
+        btn.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); var p = document.getElementById("tlg-panel"); if (p && p.style.display === "flex") closePanel(); else openPanel(); });
+        menu.appendChild(btn);
+    }
+    function injectSettingsPanel() {
+        if (document.getElementById("tlg_settings_block")) return;
+        var host = document.querySelector("#extensions_settings2") || document.querySelector("#extensions_settings") || document.querySelector("#extensions_settings1");
+        if (!host) return; var enabled = isEnabled();
+        var block = document.createElement("div"); block.id = "tlg_settings_block"; block.className = "extension_container";
+        block.innerHTML = '<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>🌊 河岸凝视</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;"><span>授予观测权限</span><div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div><div style="font-size:12px;opacity:.75;margin-bottom:10px;">解除或封锁观测台访问。</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">展开高维观测界面</button><div style="font-size:11px;opacity:.55;margin-top:10px;">快捷锚定：/tlg_anchor | 视野滤镜：/tlg_filter</div></div></div>';
+        host.appendChild(block);
+        document.getElementById("tlg_enable_toggle").onclick = function () { var next = !this.classList.contains("on"); this.classList.toggle("on", next); setEnabled(next); toast(next ? "观测权限已授予" : "观测权限已封锁"); };
+        document.getElementById("tlg_settings_open").onclick = function () { openPanel(); };
+    }
+
     function registerSlashCommand() {
-        try {
-            if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
-                window.SillyTavern.SlashCommandParser.addCommandObject(
-                    window.SillyTavern.SlashCommand.fromProps({
-                        name: "tlg_anchor",
-                        callback: function(args, value) {
-                            if (!isEnabled()) { toast("河岸凝视已关闭。"); return ""; }
-                            loadCurrentWorld(); ensureWorldExists();
-                            showAnchorModal(String(value || ""));
-                            return "";
-                        },
-                        helpString: "创建河岸凝视因果锚点。"
-                    })
-                );
-            }
-        } catch (e) { console.warn("[TLG] Slash command registration:", e); }
-
-        try {
-            var st = getST();
-            if (st && typeof st.registerSlashCommand === "function") {
-                st.registerSlashCommand("tlg_anchor", function(args, value) {
-                    if (!isEnabled()) return "";
-                    loadCurrentWorld(); ensureWorldExists();
-                    showAnchorModal(String(value || ""));
-                    return "";
-                }, [], "创建河岸凝视因果锚点", true, true);
-            }
-        } catch (e) {}
-
-        try {
-            if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
-                window.SillyTavern.SlashCommandParser.addCommandObject(
-                    window.SillyTavern.SlashCommand.fromProps({
-                        name: "tlg_open",
-                        callback: function() { openPanel(); return ""; },
-                        helpString: "打开河岸凝视面板。"
-                    })
-                );
-            }
-        } catch (e) {}
+        function wrap(value) { if (!isEnabled()) { toast("未授予观测权限。"); return ""; } loadCurrentWorld(); showAnchorModal(String(value || "")); return ""; }
+        var st = getST();
+        if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_anchor", function (a, v) { return wrap(v); }, [], "凝固当前因果刻度", true, true); }
+        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
+            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_anchor", callback: function (a, v) { return wrap(v); }, helpString: "建立新的因果锚点。" })); } catch (e) {}
+        }
+        function toggleFilter() {
+            if (!isEnabled()) { toast("未授予观测权限。"); return ""; }
+            globalApi.summaryFilterMode = !globalApi.summaryFilterMode; saveGlobalApi(); updateInjectionWithVector();
+            toast(globalApi.summaryFilterMode ? "视野滤镜：仅注视本时间线" : "视野滤镜：俯瞰全部因果纠缠"); return "";
+        }
+        if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_filter", function (a, v) { return toggleFilter(); }, [], "切换记忆视野滤镜", true, true); }
+        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
+            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_filter", callback: function (a, v) { return toggleFilter(); }, helpString: "切换提取记忆范围：本时间线/全部。" })); } catch (e) {}
+        }
     }
 
-    // ══════════════════════════════════════
-    // 自动总结监听
-    // ══════════════════════════════════════
-    function watchAutoSummary() {
-        var lastLen = 0;
-        setInterval(function() {
-            if (!isEnabled() || !globalApi.autoMode) return;
-            var st = getST(); if (!st || !st.chat) return;
-            var curLen = st.chat.length;
-            if (curLen > lastLen) {
-                var diff = curLen - lastLen;
-                state.turnsSinceAnchor += diff;
-                lastLen = curLen;
-                state._lastChatLen = curLen;
-                saveTurnsCounter();
-                if (state.turnsSinceAnchor >= (globalApi.autoInterval || 10)) {
-                    toast("⚓ 已过 " + state.turnsSinceAnchor + " 回合，建议锚定或总结。");
-                    // 自动执行总结
-                    var recentMsgs = st.chat.slice(-(globalApi.autoInterval || 10)).filter(function(m) { return !m._tlg_hidden; });
-                    if (recentMsgs.length > 0) {
-                        _doSummaryRequest(recentMsgs, true, "自动总结", function() {
-                            state.turnsSinceAnchor = 0; saveTurnsCounter();
-                        });
-                    } else {
-                        state.turnsSinceAnchor = 0; saveTurnsCounter();
-                    }
-                }
-            } else { lastLen = curLen; }
-        }, 3000);
-    }
-
-    // ══════════════════════════════════════
-    // 启动
-    // ══════════════════════════════════════
     function boot() {
-        injectMenuButton();
-
-        var observer = new MutationObserver(function() { injectMenuButton(); });
-        observer.observe(document.body, { childList: true, subtree: true });
-
+        injectMenuButton(); injectSettingsPanel();
+        new MutationObserver(function () { injectMenuButton(); injectSettingsPanel(); }).observe(document.body, { childList: true, subtree: true });
+        setInterval(injectMenuButton, 2000);
         registerSlashCommand();
-        watchAutoSummary();
+        try { loadCurrentWorld(); } catch (e) {}
+        if (!currentWorldId && getCurrentChatId()) { ensureWorldExists(); if (!state.nodes.length) resetState(); saveCurrentWorld(); }
 
-        // 监听聊天切换
         try {
             var ctx1 = getST();
             if (ctx1 && ctx1.eventSource && ctx1.eventTypes) {
-                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function() {
+                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
                     var p = document.getElementById("tlg-panel"); if (p) p.remove();
                     canvas = null; ctx = null; document.body.style.overflow = "";
                     var retries = 0;
@@ -1863,24 +1573,39 @@
                     setTimeout(tryInit, 500);
                 });
 
-                ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_RECEIVED, function() {
-                    if (!isEnabled()) return;
-                    loadCurrentWorld();
-                    applyRecentVisibility();
-                    saveCurrentWorld();
+                if (ctx1.eventTypes.MESSAGE_SWIPED) {
+                    ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SWIPED, function (msgIdx) {
+                        if (!isEnabled() || !state.lastAutoSummaryRange) return;
+                        var range = state.lastAutoSummaryRange;
+                        var idx = typeof msgIdx === "number" ? msgIdx : -1;
+                        if (idx < 0) { var st2 = getST(); idx = st2 && st2.chat ? st2.chat.length - 1 : -1; }
+                        if (idx >= range.floorFrom && idx <= range.floorTo) {
+                            if (state.summaries && state.summaries.length > range.summaryIdx) {
+                                state.summaries.splice(range.summaryIdx, 1);
+                                if (currentWorldId && worlds[currentWorldId]) worlds[currentWorldId].summaries = state.summaries;
+                                saveWorlds();
+                            }
+                            state.lastAutoSummaryRange = null;
+                            state.turnsSinceAnchor = 0; saveTurnsCounter();
+                            toast("🔄 检测到重试，已撤销最近自动切片。");
+                        }
+                    });
+                }
+
+                ctx1.eventSource.on(ctx1.eventTypes.CHAT_CHANGED, function () {
+                    var p = document.getElementById("tlg-panel"); if (p) p.remove();
+                    canvas = null; ctx = null; document.body.style.overflow = "";
+                    // 切换聊天后重新加载，保留 turnsSinceAnchor（存在 extensionSettings 里不受影响）
+                    setTimeout(function () {
+                        loadCurrentWorld();
+                        if (!currentWorldId && getCurrentChatId()) { ensureWorldExists(); if (!state.nodes.length) resetState(); saveCurrentWorld(); }
+                    }, 500);
                 });
             }
-        } catch (e) { console.warn("[TLG] Event binding:", e); }
-
-        loadGlobalApi();
-        console.log("[TLG] 河岸凝视 v3.6 已加载。");
+        } catch (e) {}
+        console.log("[TLG] 河岸凝视 v3.5 已上线");
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", boot);
-    } else {
-        boot();
-    }
+    if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
+    else { setTimeout(boot, 1000); }
 })();
-
-
