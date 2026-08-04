@@ -1,5 +1,4 @@
-cat > /tmp/write_index.py << 'PYEOF'
-code = r'''/* 河岸凝视 v3.5 */
+/* 河岸凝视 v3.5 */
 (function () {
     "use strict";
 
