@@ -742,8 +742,7 @@
         var oldParent = findNode(node.parentId);
         if (oldParent) oldParent.children = oldParent.children.filter(function (id) { return id !== nodeId; });
         var newParent = findNode(newParentId); if (!newParent) { toast("目标节点不存在。"); return; }
-        if (newParent.children.indexOf(nodeId) === -1) newParent.children.push
-(nodeId);
+        if (newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
         node.parentId = newParentId;
         saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("嫁接完成：" + node.name + " → " + newParent.name);
     }
