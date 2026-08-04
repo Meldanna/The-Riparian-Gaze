@@ -169,6 +169,15 @@
             }
                         state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null);
             state.selectedNodeId = null;
+          // 从 chatMetadata 恢复跳转状态
+            var stMeta = getST();
+            if (stMeta && stMeta.chat_metadata && typeof stMeta.chat_metadata._tlg_jumpedToIdx === "number") {
+                state._jumpedToIdx = stMeta.chat_metadata._tlg_jumpedToIdx;
+                state._chatLenAtJump = stMeta.chat_metadata._tlg_chatLenAtJump || 0;
+            } else {
+                state._jumpedToIdx = null;
+                state._chatLenAtJump = null;
+            }
             state.factUnits = w.factUnits || [];
         } else {
             currentWorldId = null; resetState();
@@ -345,6 +354,13 @@ function applyJumpVisibility(targetNodeId) {
         var parent = findNode(parentId);
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
         state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
+        state._jumpedToIdx = null; state._chatLenAtJump = null;
+        var __st = getST();
+        if (__st && __st.chat_metadata) {
+            delete __st.chat_metadata._tlg_jumpedToIdx;
+            delete __st.chat_metadata._tlg_chatLenAtJump;
+            if (typeof __st.saveMetadata === "function") __st.saveMetadata();
+        }
         saveTurnsCounter();
         saveCurrentWorld(); toast("⚓ 已锚定: " + newNode.name); renderCanvas(); refreshArchive(); return newId;
     }
@@ -2021,7 +2037,6 @@ function applyJumpVisibility(targetNodeId) {
                         }
                         // 发消息时强制刷新隐藏，确保AI生成前状态正确
                         applyRecentVisibility();
-                        if (st3 && typeof st3.saveChat === "function") st3.saveChat();
                     });
                 }
 
