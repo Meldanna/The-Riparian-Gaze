@@ -13,7 +13,9 @@
         factUnits: [],
         turnsSinceAnchor: 0,
         _lastChatLen: 0,
-        lastAutoSummaryRange: null
+        lastAutoSummaryRange: null,
+        _jumpedToIdx: null,
+        _chatLenAtJump: null
     };
 
     var globalApi = {
@@ -23,8 +25,6 @@
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
-        digestPrompt: "", queryRefinePrompt: "", digestAutoMode: true, factUnitsMaxCount: 500,
-        rerankUseLLM: false, rerankLLMPrompt: "",
         digestPrompt: "你是\"因果解析阵列\"，一个只做结构化抽取、不做创作的事实提炼引擎。\n\n【时间处理规则】\n- 本回合的系统时间为：{{turn_time}}（由调用层提供，若为空则从正文提取）\n- [T] 字段的填写优先级：\n  1. 首先使用调用层提供的系统时间 {{turn_time}} 作为基准\n  2. 在此基准上叠加正文中出现的相对时间描述（如\"上午\"\"入夜后\"\"过了半柱香\"）来细化\n  3. 如果正文中出现的时间描述能独立成立（如\"子时三刻\"\"暴雨初歇的清晨\"），直接使用\n  4. 如果系统时间为空且正文也没有时间信息，填 NULL\n- 一个回合内如果跨越了多个时间段（如从上午到下午），不同时间段的事实必须拆分为不同条目，各自标注各自的时间\n\n【任务】\n将给定的叙事文本解构为若干个独立的\"事实单元\"（Fact Unit）。每个事实单元必须严格包含以下六个维度，缺失的维度填入 NULL，禁止编造：\n\n[T] Time：按上述时间处理规则填写。\n\n[L] Location：本条事实发生的具体地理位置，用\"/\"分隔层级（如\"青州/云隐镇/朝露客栈/二楼天字房\"）。层级从大到小，越具体越好。若存在位置移动，写\"起点→终点\"（各自用\"/\"写完整层级）。若原文未给出地点信息，填 NULL。\n\n[E] Entities：参与本条事实的所有角色。每个角色单独列出，格式为\"姓名（身份标签）：本条中的状态变化描述\"。注意是\"变化\"不是\"最终状态\"——写清楚从什么变成什么，如果本条内没变化但参与了动作，写当前维持的状态。多个角色用\"；\"分隔。\n示例：林夜（主角）：右臂被刺伤，从健康变为负伤/从冷静变为警觉；苏晚（NPC·术士）：法力从充盈消耗至约八成/态度为主动援助\n\n[I] Items：物品的获得/失去/损毁/移交/使用/状态改变。每个物品单独列出，格式为\"物品全称 → 变动类型 → 变动前持有者及状态 → 变动后持有者及状态\"。禁止用代词。多个物品用\"；\"分隔。若无物品变动填 NULL。\n\n[A] Actions：发生的动作事实。格式固定为 [主语]对[目标]执行[具体动作]，结果为[直接结果]。只保留动词性事实，删除所有形容词、比喻、心理描写。一个事实单元内若含多个连续动作（必须共享同一个 [T] 和 [L]），按时间顺序用\"→\"连接。\n\n[C] Consequence：该动作导致的不可逆因果结果或状态锁定。必须是\"已经发生/已经改变\"的状态，不是预测或伏笔。若因果结果尚未显现，填 NULL。若某个结果对后续剧情有重大影响，在末尾加标记 [!重要]。\n\n【切片边界判定】\n不预设\"一回合等于一条\"。输出条数由原文中实际存在的独立事实数量决定——可能是1条，也可能是几十条。\n\n命中以下任一信号，必须另起一条：\n1. 时间变化：出现新的时间描述，且之后的事实不再和前面共享同一个因果结果。\n2. 地点变化：事实发生的地理位置改变了，且新位置上发生了新的独立事件。\n3. 因果并行：同一时间窗口内存在两组互不影响的动作线。\n4. 多实体独立状态变化：2个及以上不同角色各自发生独立的状态变化。\n5. 多物品独立变动：2个及以上物品分别发生独立的状态变化。\n6. 动作链过长：[A]字段需要超过3个\"→\"才能表达完整。\n7. 因果结果切换：原文出现\"结果\"\"最终\"\"没想到\"\"谁知\"\"紧接着又\"等信号词。\n\n每写完一条，自检：[T]和[L]对这一条里的每一个其他字段是否都同时成立？不成立则继续拆。\n\n【硬性规则】\n1. 严禁输出任何Markdown符号。\n2. 严禁输出解释、总结、标题、开场白或结尾寒暄。\n3. 严禁抒情化改写——你在给数据库写日志。\n4. 找不到依据的维度写NULL，绝不为凑格式而编造。\n5. 每条输出自成一行，字段间用\" | \"分隔，字段顺序固定为T-L-E-I-A-C。\n6. 不要因为担心输出太长而省略——有多少条就输出多少条。\n7. [E]字段中每个角色必须带身份标签（如\"NPC·术士\"\"主角\"），供下游样本库提取。\n8. [L]字段中地理层级必须用\"/\"分隔，供下游地理库提取地点树结构。\n9. [E]字段写\"变化\"不写\"最终状态\"——要体现\"从A到B\"的过程。\n\n【输出格式（唯一允许的格式）】\n[T]: <> | [L]: <> | [E]: <> | [I]: <> | [A]: <> | [C]: <>\n\n现在开始处理以下文本：\n{{context}}",
         queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
         digestAutoMode: true, factUnitsMaxCount: 500,
@@ -287,22 +287,21 @@
         }
     }
     function applyJumpVisibility(targetNodeId) {
-        // 跳转专用可见性：只显示目标节点 msgIdx 往前 lastN 条，其余全隐藏
         var st = getST(); if (!st || !st.chat) return;
         var target = findNode(targetNodeId); if (!target) return;
         var lastN = Math.max(1, globalApi.lastNMessages || 5);
         var endIdx = target.msgIdx;
-        // 可见范围：[endIdx - lastN + 1, endIdx]
         var visStart = Math.max(0, endIdx - lastN + 1);
         for (var i = 0; i < st.chat.length; i++) {
             if (i >= visStart && i <= endIdx) {
-                // 可见
                 if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
             } else {
-                // 隐藏
                 if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
             }
         }
+        // 记录跳转状态，applyRecentVisibility 会据此判断模式
+        state._jumpedToIdx = endIdx;
+        state._chatLenAtJump = st.chat.length;
         if (typeof st.reloadCurrentChat === "function") st.reloadCurrentChat();
     }
 
@@ -310,11 +309,29 @@
         var st = getST(); if (!st || !st.chat || !st.chat.length) return;
         var lastN = Math.max(1, globalApi.lastNMessages || 5);
         var total = st.chat.length;
-        for (var i = 0; i < total; i++) {
-            if (i >= total - lastN) {
-                if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+
+        // 跳转模式：以跳转目标为基准，显示目标前lastN + 跳转后新增的消息
+        if (typeof state._jumpedToIdx === "number" && state._jumpedToIdx >= 0) {
+            var visStart = Math.max(0, state._jumpedToIdx - lastN + 1);
+            var visEnd = state._jumpedToIdx;
+            // 跳转后新增的消息也应可见（跳转时 chat 长度记在 _chatLenAtJump）
+            var newStart = (typeof state._chatLenAtJump === "number") ? state._chatLenAtJump : total;
+            for (var i = 0; i < total; i++) {
+                if ((i >= visStart && i <= visEnd) || i >= newStart) {
+                    if (st.chat[i]._tlg_hidden) { delete st.chat[i].is_system; delete st.chat[i]._tlg_hidden; }
+                } else {
+                    if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+                }
+            }
+            return;
+        }
+
+        // 正常模式：显示最后 lastN 条
+        for (var j = 0; j < total; j++) {
+            if (j >= total - lastN) {
+                if (st.chat[j]._tlg_hidden) { delete st.chat[j].is_system; delete st.chat[j]._tlg_hidden; }
             } else {
-                if (!st.chat[i].is_system) { st.chat[i].is_system = true; st.chat[i]._tlg_hidden = true; }
+                if (!st.chat[j].is_system) { st.chat[j].is_system = true; st.chat[j]._tlg_hidden = true; }
             }
         }
     }
@@ -337,11 +354,12 @@
         var newNode = { id: newId, name: name || ("节点@#" + msgIdx), brief: brief || "", parentId: parentId, msgIdx: msgIdx, statData: getMVUStatData(), timestamp: Date.now(), children: [] };
         var parent = findNode(parentId);
         if (parent && parent.children.indexOf(newId) === -1) parent.children.push(newId);
-        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId;
-        saveCurrentWorld(); toast("⚓ 已锚定于 #" + msgIdx + ": " + newNode.name); renderCanvas(); refreshArchive(); return newId;
+        state.nodes.push(newNode); state.currentNodeId = newId; state.selectedNodeId = newId; state.turnsSinceAnchor = 0;
+        state._jumpedToIdx = null; state._chatLenAtJump = null;
+        saveTurnsCounter();
     }
 
-        function jumpToNode(nodeId) {
+    function jumpToNode(nodeId) {
         var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
         var st = getST();
 
