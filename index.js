@@ -1569,12 +1569,12 @@
             }).join("");
     }
     // ══════════════════════════════════════
-    // 世界档案：地理树
+    // 世界档案：地理树（横向布局）
     // ══════════════════════════════════════
     var geoCanvas = null, geoCtx = null;
     var geoCamX = 0, geoCamY = 0, geoCamZoom = 1;
     var geoIsPanning = false, geoPanStartX = 0, geoPanStartY = 0;
-    var geoSelectedNode = null;
+    var geoSelectedPath = null;
 
     function getGeoTree() {
         if (!currentWorldId || !worlds[currentWorldId]) return {};
@@ -1582,28 +1582,15 @@
         return worlds[currentWorldId].geoTree;
     }
 
-    // 把嵌套树扁平化为带坐标的节点列表
     function flattenGeoTree() {
         var tree = getGeoTree();
-        var nodes = []; // { name, fullPath, desc, isCurrent, locked, depth, parentPath, children[] }
-
+        var nodes = [];
         function walk(subtree, parentPath, depth) {
             var keys = Object.keys(subtree);
             for (var i = 0; i < keys.length; i++) {
-                var name = keys[i];
-                var node = subtree[name];
+                var name = keys[i], node = subtree[name];
                 var fullPath = parentPath ? parentPath + "/" + name : name;
-                var childKeys = Object.keys(node.children || {});
-                nodes.push({
-                    name: name,
-                    fullPath: fullPath,
-                    desc: node.desc || "",
-                    isCurrent: node.isCurrent || false,
-                    locked: node.locked || false,
-                    depth: depth,
-                    parentPath: parentPath,
-                    childCount: childKeys.length
-                });
+                nodes.push({ name: name, fullPath: fullPath, desc: node.desc || "", isCurrent: node.isCurrent || false, locked: node.locked || false, depth: depth, parentPath: parentPath });
                 if (node.children) walk(node.children, fullPath, depth + 1);
             }
         }
@@ -1611,24 +1598,24 @@
         return nodes;
     }
 
-    // 分配坐标（横向排列同层级）
-    function layoutGeoNodes(nodes) {
-        // 按层级分组
+    // 横向布局：depth→X轴，同层级→Y轴
+    function layoutGeoNodes() {
+        var nodes = flattenGeoTree();
+        var X_GAP = 180, Y_GAP = 70;
         var byDepth = {};
         for (var i = 0; i < nodes.length; i++) {
             var d = nodes[i].depth;
             if (!byDepth[d]) byDepth[d] = [];
             byDepth[d].push(nodes[i]);
         }
-        var H_GAP = 160, V_GAP = 110;
-        var depths = Object.keys(byDepth).map(Number).sort(function(a,b){ return a-b; });
+        var depths = Object.keys(byDepth).map(Number).sort(function(a, b) { return a - b; });
         for (var di = 0; di < depths.length; di++) {
             var row = byDepth[depths[di]];
-            var totalWidth = row.length * H_GAP;
-            var startX = -totalWidth / 2 + H_GAP / 2;
+            var totalH = row.length * Y_GAP;
+            var startY = -totalH / 2 + Y_GAP / 2;
             for (var ri = 0; ri < row.length; ri++) {
-                row[ri].x = startX + ri * H_GAP;
-                row[ri].y = depths[di] * V_GAP + 60;
+                row[ri].x = depths[di] * X_GAP + 80;
+                row[ri].y = startY + ri * Y_GAP;
             }
         }
         return nodes;
@@ -1639,90 +1626,56 @@
         var dpr = window.devicePixelRatio || 1;
         var rect = geoCanvas.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
-        geoCanvas.width = rect.width * dpr;
-        geoCanvas.height = rect.height * dpr;
+        geoCanvas.width = rect.width * dpr; geoCanvas.height = rect.height * dpr;
         geoCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         geoCtx.fillStyle = "#050508";
         geoCtx.fillRect(0, 0, rect.width, rect.height);
-
-        var nodes = layoutGeoNodes(flattenGeoTree());
+        var nodes = layoutGeoNodes();
         if (!nodes.length) {
-            geoCtx.fillStyle = "#5a5a6a";
-            geoCtx.font = "13px sans-serif";
-            geoCtx.textAlign = "center";
+            geoCtx.fillStyle = "#5a5a6a"; geoCtx.font = "13px sans-serif"; geoCtx.textAlign = "center";
             geoCtx.fillText("暂无地理数据。点击「+ 添加地点」创建。", rect.width / 2, rect.height / 2);
             return;
         }
-
         geoCtx.save();
-        geoCtx.translate(rect.width / 2 + geoCamX, geoCamY + 30);
+        geoCtx.translate(rect.width / 2 + geoCamX, rect.height / 2 + geoCamY);
         geoCtx.scale(geoCamZoom, geoCamZoom);
-
-        var NODE_R = 18;
-
-        // 建立 fullPath → 坐标 的索引
-        var posMap = {};
+        var NODE_R = 16, posMap = {};
         for (var i = 0; i < nodes.length; i++) posMap[nodes[i].fullPath] = nodes[i];
-
-        // 画连线
+        // 连线
         for (var j = 0; j < nodes.length; j++) {
-            var n = nodes[j];
-            if (!n.parentPath) continue;
-            var parent = posMap[n.parentPath];
-            if (!parent) continue;
+            var n = nodes[j]; if (!n.parentPath) continue;
+            var parent = posMap[n.parentPath]; if (!parent) continue;
             geoCtx.beginPath();
-            geoCtx.moveTo(parent.x, parent.y + NODE_R);
-            var cy = (parent.y + n.y) / 2;
-            geoCtx.bezierCurveTo(parent.x, cy, n.x, cy, n.x, n.y - NODE_R);
-            geoCtx.strokeStyle = "rgba(100,160,100,0.35)";
-            geoCtx.lineWidth = 1.5;
-            geoCtx.stroke();
+            geoCtx.moveTo(parent.x + NODE_R, parent.y);
+            var cx = (parent.x + n.x) / 2;
+            geoCtx.bezierCurveTo(cx, parent.y, cx, n.y, n.x - NODE_R, n.y);
+            geoCtx.strokeStyle = "rgba(200,200,210,0.3)"; geoCtx.lineWidth = 1.2; geoCtx.stroke();
         }
-
-        // 画节点
+        // 节点
         for (var k = 0; k < nodes.length; k++) {
-            var nd = nodes[k];
-            var isSelected = geoSelectedNode === nd.fullPath;
-
-            geoCtx.beginPath();
-            geoCtx.arc(nd.x, nd.y, NODE_R, 0, Math.PI * 2);
-
+            var nd = nodes[k], isSel = geoSelectedPath === nd.fullPath;
+            geoCtx.beginPath(); geoCtx.arc(nd.x, nd.y, NODE_R, 0, Math.PI * 2);
             if (nd.isCurrent) {
-                geoCtx.fillStyle = "rgba(80,200,80,0.15)";
-                geoCtx.strokeStyle = "#55cc55";
-                geoCtx.lineWidth = 2;
-                geoCtx.shadowColor = "rgba(80,200,80,0.5)";
-                geoCtx.shadowBlur = 10;
-            } else if (isSelected) {
-                geoCtx.fillStyle = "rgba(180,180,200,0.12)";
-                geoCtx.strokeStyle = "#a0a0c0";
-                geoCtx.lineWidth = 2;
-                geoCtx.shadowBlur = 0;
+                geoCtx.fillStyle = "rgba(255,255,255,0.12)"; geoCtx.strokeStyle = "#ffffff"; geoCtx.lineWidth = 2;
+                geoCtx.shadowColor = "rgba(255,255,255,0.6)"; geoCtx.shadowBlur = 12;
+            } else if (isSel) {
+                geoCtx.fillStyle = "rgba(200,200,220,0.1)"; geoCtx.strokeStyle = "#b0b0c0"; geoCtx.lineWidth = 1.5; geoCtx.shadowBlur = 0;
             } else {
-                geoCtx.fillStyle = "rgba(120,160,120,0.06)";
-                geoCtx.strokeStyle = "rgba(120,160,120,0.35)";
-                geoCtx.lineWidth = 1;
-                geoCtx.shadowBlur = 0;
+                geoCtx.fillStyle = "rgba(180,180,200,0.04)"; geoCtx.strokeStyle = "rgba(180,180,200,0.3)"; geoCtx.lineWidth = 1; geoCtx.shadowBlur = 0;
             }
-            geoCtx.fill();
-            geoCtx.stroke();
-            geoCtx.shadowBlur = 0;
-
-            // 标签
-            geoCtx.fillStyle = nd.isCurrent ? "#55cc55" : isSelected ? "#c0c0d0" : "rgba(160,180,160,0.7)";
+            geoCtx.fill(); geoCtx.stroke(); geoCtx.shadowBlur = 0;
+            // 标签（右侧）
+            geoCtx.fillStyle = nd.isCurrent ? "#ffffff" : isSel ? "#c0c0d0" : "rgba(180,180,200,0.6)";
             geoCtx.font = nd.isCurrent ? "bold 10px sans-serif" : "10px sans-serif";
-            geoCtx.textAlign = "center";
-            geoCtx.textBaseline = "top";
-            var label = nd.name.length > 10 ? nd.name.slice(0, 9) + "…" : nd.name;
-            geoCtx.fillText(label, nd.x, nd.y + NODE_R + 4);
-
-            if (nd.isCurrent) {
-                geoCtx.fillStyle = "rgba(80,200,80,0.6)";
-                geoCtx.font = "9px sans-serif";
-                geoCtx.fillText("📍", nd.x, nd.y - NODE_R - 12);
+            geoCtx.textAlign = "left"; geoCtx.textBaseline = "middle";
+            geoCtx.fillText(nd.name.length > 8 ? nd.name.slice(0, 7) + "…" : nd.name, nd.x + NODE_R + 6, nd.y);
+            if (nd.isCurrent) { geoCtx.fillText("📍", nd.x - NODE_R - 14, nd.y); }
+            // 选中时画编辑图标
+            if (isSel) {
+                geoCtx.fillStyle = "rgba(255,255,255,0.7)"; geoCtx.font = "10px sans-serif"; geoCtx.textAlign = "center";
+                geoCtx.fillText("✎", nd.x, nd.y + NODE_R + 14);
             }
         }
-
         geoCtx.restore();
     }
 
@@ -1730,125 +1683,122 @@
         if (!geoCanvas) return null;
         var rect = geoCanvas.getBoundingClientRect();
         var mx = (clientX - rect.left - rect.width / 2 - geoCamX) / geoCamZoom;
-        var my = (clientY - rect.top - geoCamY - 30) / geoCamZoom;
-        var nodes = layoutGeoNodes(flattenGeoTree());
-        var NODE_R = 18;
+        var my = (clientY - rect.top - rect.height / 2 - geoCamY) / geoCamZoom;
+        var nodes = layoutGeoNodes(), NODE_R = 16;
         for (var i = 0; i < nodes.length; i++) {
             var dx = mx - nodes[i].x, dy = my - nodes[i].y;
-            if (dx * dx + dy * dy <= (NODE_R + 4) * (NODE_R + 4)) return nodes[i].fullPath;
+            if (dx * dx + dy * dy <= (NODE_R + 6) * (NODE_R + 6)) return nodes[i].fullPath;
         }
         return null;
     }
 
-    function showGeoInfoPanel(fullPath) {
-        var tree = getGeoTree();
-        var parts = fullPath.split("/");
-        var cur = tree;
-        var node = null;
-        for (var i = 0; i < parts.length; i++) {
-            if (!cur[parts[i]]) return;
-            node = cur[parts[i]];
-            cur = node.children || {};
+    function geoEditHitTest(clientX, clientY) {
+        if (!geoSelectedPath || !geoCanvas) return false;
+        var rect = geoCanvas.getBoundingClientRect();
+        var mx = (clientX - rect.left - rect.width / 2 - geoCamX) / geoCamZoom;
+        var my = (clientY - rect.top - rect.height / 2 - geoCamY) / geoCamZoom;
+        var nodes = layoutGeoNodes(), NODE_R = 16;
+        for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].fullPath !== geoSelectedPath) continue;
+            var dy = my - (nodes[i].y + NODE_R + 14);
+            var dx = mx - nodes[i].x;
+            return Math.abs(dx) < 12 && Math.abs(dy) < 10;
         }
-        if (!node) return;
-        geoSelectedNode = fullPath;
-        renderGeoCanvas();
-        // 简介 toast
-        var info = "📍 " + fullPath;
-        if (node.desc) info += "\n" + node.desc;
-        if (node.isCurrent) info += "\n（主角当前位置）";
-        toast(info, 4000);
+        return false;
     }
 
     function initGeoCanvas() {
         var c = document.getElementById("tlg-geo-canvas");
         if (!c || c === geoCanvas) { renderGeoCanvas(); return; }
-        geoCanvas = c;
-        geoCtx = c.getContext("2d");
-
-        c.addEventListener("mousedown", function(e) {
+        geoCanvas = c; geoCtx = c.getContext("2d");
+        c.onmousedown = function(e) {
+            if (e.button !== 0) return;
+            // 先检查编辑按钮
+            if (geoEditHitTest(e.clientX, e.clientY)) { showEditGeoModal(geoSelectedPath); return; }
             var hit = geoHitTest(e.clientX, e.clientY);
-            if (hit) { showGeoInfoPanel(hit); return; }
-            geoIsPanning = true;
-            geoPanStartX = e.clientX - geoCamX;
-            geoPanStartY = e.clientY - geoCamY;
-            c.style.cursor = "grabbing";
-        });
-        c.addEventListener("mousemove", function(e) {
-            if (!geoIsPanning) return;
-            geoCamX = e.clientX - geoPanStartX;
-            geoCamY = e.clientY - geoPanStartY;
-            renderGeoCanvas();
-        });
-        c.addEventListener("mouseup", function() { geoIsPanning = false; c.style.cursor = "grab"; });
-        c.addEventListener("mouseleave", function() { geoIsPanning = false; c.style.cursor = "grab"; });
-        c.addEventListener("wheel", function(e) {
-            e.preventDefault();
-            geoCamZoom = Math.max(0.2, Math.min(5, geoCamZoom * (e.deltaY < 0 ? 1.1 : 0.9)));
-            renderGeoCanvas();
-        }, { passive: false });
-
+            if (hit) {
+                geoSelectedPath = (geoSelectedPath === hit) ? null : hit;
+                renderGeoCanvas(); return;
+            }
+            geoSelectedPath = null;
+            geoIsPanning = true; geoPanStartX = e.clientX - geoCamX; geoPanStartY = e.clientY - geoCamY;
+            c.style.cursor = "grabbing"; renderGeoCanvas();
+        };
+        c.onmousemove = function(e) { if (!geoIsPanning) return; geoCamX = e.clientX - geoPanStartX; geoCamY = e.clientY - geoPanStartY; renderGeoCanvas(); };
+        c.onmouseup = function() { geoIsPanning = false; c.style.cursor = "grab"; };
+        c.onmouseleave = function() { geoIsPanning = false; c.style.cursor = "grab"; };
+        c.onwheel = function(e) { e.preventDefault(); geoCamZoom = Math.max(0.2, Math.min(5, geoCamZoom * (e.deltaY < 0 ? 1.1 : 0.9))); renderGeoCanvas(); };
         renderGeoCanvas();
     }
-
     function refreshGeoTree() { renderGeoCanvas(); }
 
-    // 获取所有地理条目的 fullPath 列表（供选择上级用）
-    function getAllGeoPaths() {
-        var paths = [];
-        var nodes = flattenGeoTree();
-        for (var i = 0; i < nodes.length; i++) paths.push(nodes[i].fullPath);
-        return paths;
-    }
+    function getAllGeoPaths() { return flattenGeoTree().map(function(n) { return n.fullPath; }); }
 
     function showAddGeoModal() {
         var existing = document.getElementById("tlg-geo-modal"); if (existing) existing.remove();
         var allPaths = getAllGeoPaths();
-        var optionsHtml = '<option value="">（设为最高层级）</option>';
-        for (var i = 0; i < allPaths.length; i++) {
-            optionsHtml += '<option value="' + escHtml(allPaths[i]) + '">' + escHtml(allPaths[i]) + '</option>';
-        }
-
-        var backdrop = document.createElement("div"); backdrop.id = "tlg-geo-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;";
-        backdrop.innerHTML = '<div class="tlg-modal" style="background:#0a0a14;border:1px solid #2a2a3a;color:#c0c0c8;">' +
-            '<div class="tlg-modal-title" style="color:#e8e8f0;">+ 添加地点</div>' +
-            '<label class="tlg-label" style="color:#7a7a8a;">地点名称</label>' +
-            '<input class="tlg-input" id="tlg-geo-name-input" placeholder="如：朝露客栈" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;margin-bottom:10px" />' +
-            '<label class="tlg-label" style="color:#7a7a8a;">简介（可选）</label>' +
-            '<textarea class="tlg-textarea" id="tlg-geo-desc-input" placeholder="该地点的描述…" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;min-height:50px;margin-bottom:10px"></textarea>' +
-            '<label class="tlg-label" style="color:#7a7a8a;">上级地理（选择父级，或留空设为最高层级）</label>' +
-            '<select class="tlg-select" id="tlg-geo-parent-select" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;margin-bottom:10px;max-height:150px;">' + optionsHtml + '</select>' +
-            '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">' +
-            '<label style="font-size:11px;color:#7a7a8a;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="tlg-geo-iscurrent" /> 标记为主角当前位置</label>' +
-            '</div>' +
-            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-geo-modal-cancel" style="border-color:#2a2a3a;color:#c0c0c8;">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-modal-ok">确认添加</button></div>' +
-            '</div>';
-        document.body.appendChild(backdrop);
-
-        backdrop.querySelector("#tlg-geo-modal-cancel").onclick = function() { backdrop.remove(); };
-        backdrop.querySelector("#tlg-geo-modal-ok").onclick = function() {
-            var name = backdrop.querySelector("#tlg-geo-name-input").value.trim();
-            if (!name) { toast("名称不能为空。"); return; }
-            var desc = backdrop.querySelector("#tlg-geo-desc-input").value.trim();
-            var parentPath = backdrop.querySelector("#tlg-geo-parent-select").value;
-            var isCurrent = backdrop.querySelector("#tlg-geo-iscurrent").checked;
-
-            // 构建 path 数组
-            var path;
-            if (parentPath) {
-                path = parentPath.split("/").concat([name]);
-            } else {
-                path = [name];
-            }
-
-            applyGeoUpdates({ path: path, desc: desc, is_current: isCurrent, moved_from: null }, currentWorldId);
-            backdrop.remove();
-            toast("地点已添加：" + path.join("/"));
-            renderGeoCanvas();
+        var optsHtml = '<option value="">（最高层级）</option>' + allPaths.map(function(p) { return '<option value="' + escHtml(p) + '">' + escHtml(p) + '</option>'; }).join("");
+        var bd = document.createElement("div"); bd.id = "tlg-geo-modal";
+        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;";
+        bd.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">+ 添加地点</div>' +
+            '<label class="tlg-label">名称</label><input class="tlg-input" id="tlg-geo-name" placeholder="地点名称" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">简介</label><textarea class="tlg-textarea" id="tlg-geo-desc" style="min-height:50px;margin-bottom:8px"></textarea>' +
+            '<label class="tlg-label">上级地理</label><select class="tlg-select" id="tlg-geo-parent" style="margin-bottom:8px;max-height:120px;overflow-y:auto;">' + optsHtml + '</select>' +
+            '<label style="font-size:11px;color:#7a7a8a;display:flex;align-items:center;gap:6px;margin-bottom:10px;"><input type="checkbox" id="tlg-geo-cur" /> 主角当前位置</label>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-geo-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-ok">确认</button></div></div>';
+        document.body.appendChild(bd);
+        bd.querySelector("#tlg-geo-cancel").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-geo-ok").onclick = function() {
+            var name = bd.querySelector("#tlg-geo-name").value.trim(); if (!name) { toast("名称为空。"); return; }
+            var parentPath = bd.querySelector("#tlg-geo-parent").value;
+            var path = parentPath ? parentPath.split("/").concat([name]) : [name];
+            applyGeoUpdates({ path: path, desc: bd.querySelector("#tlg-geo-desc").value.trim(), is_current: bd.querySelector("#tlg-geo-cur").checked, moved_from: null }, currentWorldId);
+            bd.remove(); renderGeoCanvas();
         };
-        backdrop.addEventListener("click", function(e) { if (e.target === backdrop) backdrop.remove(); });
-        setTimeout(function() { backdrop.querySelector("#tlg-geo-name-input").focus(); }, 80);
+        bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
+    }
+
+    function showEditGeoModal(fullPath) {
+        var tree = getGeoTree(), parts = fullPath.split("/"), cur = tree, node = null;
+        for (var i = 0; i < parts.length; i++) { if (!cur[parts[i]]) return; node = cur[parts[i]]; cur = node.children || {}; }
+        if (!node) return;
+        var existing = document.getElementById("tlg-geo-modal"); if (existing) existing.remove();
+        var bd = document.createElement("div"); bd.id = "tlg-geo-modal";
+        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;";
+        bd.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">编辑：' + escHtml(fullPath) + '</div>' +
+            '<label class="tlg-label">简介</label><textarea class="tlg-textarea" id="tlg-geo-edit-desc" style="min-height:60px;margin-bottom:8px">' + escHtml(node.desc || "") + '</textarea>' +
+            '<label style="font-size:11px;color:#7a7a8a;display:flex;align-items:center;gap:6px;margin-bottom:8px;"><input type="checkbox" id="tlg-geo-edit-cur" ' + (node.isCurrent ? "checked" : "") + ' /> 主角当前位置</label>' +
+            '<label style="font-size:11px;color:#7a7a8a;display:flex;align-items:center;gap:6px;margin-bottom:10px;"><input type="checkbox" id="tlg-geo-edit-lock" ' + (node.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖简介）</label>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn tlg-btn-danger" id="tlg-geo-edit-del" style="margin-right:auto;font-size:11px;padding:4px 8px;">删除</button><button type="button" class="tlg-btn" id="tlg-geo-edit-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-edit-save">保存</button></div></div>';
+        document.body.appendChild(bd);
+        bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-geo-edit-save").onclick = function() {
+            node.desc = bd.querySelector("#tlg-geo-edit-desc").value.trim();
+            node.locked = bd.querySelector("#tlg-geo-edit-lock").checked;
+            var wasCurrent = node.isCurrent;
+            var nowCurrent = bd.querySelector("#tlg-geo-edit-cur").checked;
+            if (nowCurrent && !wasCurrent) { clearAllGeoCurrent(getGeoTree()); node.isCurrent = true; }
+            else if (!nowCurrent) { node.isCurrent = false; }
+            saveWorlds(); bd.remove(); renderGeoCanvas(); toast("已保存。");
+        };
+        bd.querySelector("#tlg-geo-edit-del").onclick = function() {
+            if (!confirm("删除「" + fullPath + "」及其所有子级？")) return;
+            deleteGeoNode(fullPath); bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("已删除。");
+        };
+        bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
+    }
+
+    function clearAllGeoCurrent(subtree) {
+        var keys = Object.keys(subtree);
+        for (var i = 0; i < keys.length; i++) { subtree[keys[i]].isCurrent = false; if (subtree[keys[i]].children) clearAllGeoCurrent(subtree[keys[i]].children); }
+    }
+
+    function deleteGeoNode(fullPath) {
+        var tree = getGeoTree(), parts = fullPath.split("/");
+        if (parts.length === 1) { delete tree[parts[0]]; saveWorlds(); return; }
+        var cur = tree;
+        for (var i = 0; i < parts.length - 1; i++) { if (!cur[parts[i]]) return; cur = cur[parts[i]].children; }
+        delete cur[parts[parts.length - 1]]; saveWorlds();
     }
 
     // ══════════════════════════════════════
@@ -1860,98 +1810,130 @@
         return worlds[currentWorldId].npcArchive;
     }
 
+    function getMvuNpcData() {
+        // 从 MVU stat_data 提取NPC信息
+        try {
+            var snap = window.__tlg_mvu_snapshot || {};
+            // MVU 常见结构：snap.npcs 或 snap.characters
+            if (snap.npcs && typeof snap.npcs === "object") return snap.npcs;
+            if (snap.characters && typeof snap.characters === "object") return snap.characters;
+            // 尝试遍历找NPC相关字段
+            var result = {};
+            var keys = Object.keys(snap);
+            for (var i = 0; i < keys.length; i++) {
+                var v = snap[keys[i]];
+                if (v && typeof v === "object" && (v.hp !== undefined || v.life !== undefined || v.mp !== undefined || v.clothing !== undefined)) {
+                    result[keys[i]] = v;
+                }
+            }
+            return Object.keys(result).length ? result : null;
+        } catch (e) { return null; }
+    }
+
     function refreshNpcList() {
         var container = document.getElementById("tlg-npc-list"); if (!container) return;
         var archive = getNpcArchive();
         var filter = document.getElementById("tlg-npc-filter");
         var filterVal = filter ? filter.value : "all";
         var names = Object.keys(archive);
-        if (!names.length) { container.innerHTML = '<div style="color:#5a5a6a;font-style:italic;padding:20px 0;">暂无样本数据。AI每回合自动提取，或手动添加。</div>'; return; }
+        var mvuData = getMvuNpcData();
 
-        var filtered = names.filter(function(name) {
-            if (filterVal === "all") return true;
-            return (archive[name].tier || "normal") === filterVal;
-        });
+        if (!names.length) { container.innerHTML = '<div style="color:#5a5a6a;font-style:italic;padding:20px 0;">暂无样本。AI自动提取或手动添加。</div>'; return; }
+
+        var filtered = names.filter(function(name) { return filterVal === "all" || (archive[name].tier || "normal") === filterVal; });
 
         container.innerHTML = filtered.map(function(name) {
             var npc = archive[name];
             var tier = npc.tier || "normal";
-            var tierLabel = tier === "core" ? "🔴 核心" : tier === "important" ? "🟡 重要" : "⚪ 普通";
+            // 光点大小
+            var dotSize = tier === "core" ? "10px" : tier === "important" ? "7px" : "4px";
+            var dotGlow = tier === "core" ? "box-shadow:0 0 6px rgba(255,255,255,0.8);" : tier === "important" ? "box-shadow:0 0 4px rgba(255,255,255,0.4);" : "";
             var timelineCount = (npc.timeline || []).length;
-            return '<div class="tlg-archive-card" style="margin-bottom:10px;">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                '<div class="tlg-archive-title">' + escHtml(name) + ' <span style="font-size:10px;color:#7a7a8a">(' + escHtml(npc.role || "未知") + ')</span></div>' +
-                '<span style="font-size:10px;">' + tierLabel + '</span></div>' +
-                '<div class="tlg-archive-meta">' + timelineCount + ' 条经历记录</div>' +
-                (npc.appearance && npc.appearance.value ? '<div style="font-size:11px;color:#8a8a9a;margin-top:4px;">外貌：' + escHtml(npc.appearance.value.slice(0, 60)) + (npc.appearance.value.length > 60 ? "…" : "") + '</div>' : '') +
-                '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button type="button" class="tlg-btn tlg-npc-detail" data-name="' + escHtml(name) + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;font-size:11px;">详情</button>' +
-                '<select class="tlg-select tlg-npc-tier" data-name="' + escHtml(name) + '" style="width:auto;padding:2px 6px;font-size:10px;"><option value="core"' + (tier === "core" ? " selected" : "") + '>核心</option><option value="important"' + (tier === "important" ? " selected" : "") + '>重要</option><option value="normal"' + (tier === "normal" ? " selected" : "") + '>普通</option></select>' +
-                '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;font-size:11px;">✕</button>' +
-                '</div></div>';
+            // MVU 数据
+            var mvuStr = "";
+            if (mvuData && mvuData[name]) {
+                var md = mvuData[name];
+                var parts = [];
+                if (md.hp !== undefined || md.life !== undefined) parts.push("生命:" + (md.hp || md.life));
+                if (md.mp !== undefined || md.mana !== undefined) parts.push("法力:" + (md.mp || md.mana));
+                if (md.clothing !== undefined) parts.push("穿着:" + md.clothing);
+                if (md.items !== undefined) parts.push("物品:" + (Array.isArray(md.items) ? md.items.join(",") : md.items));
+                if (md.affection !== undefined || md.favor !== undefined) parts.push("好感:" + (md.affection || md.favor));
+                mvuStr = parts.join(" · ");
+            }
+            return '<div class="tlg-archive-card" style="margin-bottom:8px;padding:10px 12px;">' +
+                '<div style="display:flex;align-items:center;gap:8px;">' +
+                '<div style="width:' + dotSize + ';height:' + dotSize + ';border-radius:50%;background:#ffffff;flex-shrink:0;' + dotGlow + '"></div>' +
+                '<select class="tlg-npc-tier" data-name="' + escHtml(name) + '" style="background:#0a0a14;border:1px solid #2a2a3a;color:#8a8a9a;font-size:9px;padding:1px 4px;border-radius:3px;width:auto;">' +
+                '<option value="core"' + (tier === "core" ? " selected" : "") + '>核心</option>' +
+                '<option value="important"' + (tier === "important" ? " selected" : "") + '>重要</option>' +
+                '<option value="normal"' + (tier === "normal" ? " selected" : "") + '>普通</option></select>' +
+                '<div style="font-size:13px;font-weight:600;color:#e8e8f0;flex:1;">' + escHtml(name) + '</div>' +
+                '<button type="button" class="tlg-btn tlg-npc-del" data-name="' + escHtml(name) + '" style="font-size:9px;padding:2px 5px;color:#c0c0c8;border-color:#3a3a4a;">✕</button>' +
+                '</div>' +
+                '<div style="font-size:11px;color:#7a7a8a;margin-top:4px;">' + escHtml(npc.role || "未知身份") + '</div>' +
+                (npc.appearance && npc.appearance.value ? '<div style="font-size:11px;color:#6a6a7a;margin-top:2px;">外貌：' + escHtml(npc.appearance.value.slice(0, 50)) + (npc.appearance.value.length > 50 ? "…" : "") + '</div>' : '') +
+                (mvuStr ? '<div style="font-size:10px;color:#5a8a5a;margin-top:3px;">MVU：' + escHtml(mvuStr) + '</div>' : '') +
+                '<div style="font-size:10px;color:#5a5a6a;margin-top:3px;">' + timelineCount + ' 条经历</div>' +
+                '<button type="button" class="tlg-btn tlg-npc-detail" data-name="' + escHtml(name) + '" style="font-size:10px;margin-top:6px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">详情编辑</button>' +
+                '</div>';
         }).join("");
 
-        container.querySelectorAll(".tlg-npc-detail").forEach(function(btn) {
-            btn.onclick = function() { showNpcDetailModal(btn.dataset.name); };
-        });
+        container.querySelectorAll(".tlg-npc-detail").forEach(function(btn) { btn.onclick = function() { showNpcDetailModal(btn.dataset.name); }; });
         container.querySelectorAll(".tlg-npc-tier").forEach(function(sel) {
-            sel.onchange = function() {
-                var arc = getNpcArchive();
-                if (arc[sel.dataset.name]) { arc[sel.dataset.name].tier = sel.value; saveWorlds(); }
-            };
+            sel.onchange = function() { var arc = getNpcArchive(); if (arc[sel.dataset.name]) { arc[sel.dataset.name].tier = sel.value; saveWorlds(); refreshNpcList(); } };
         });
         container.querySelectorAll(".tlg-npc-del").forEach(function(btn) {
-            btn.onclick = function() {
-                if (!confirm("删除样本「" + btn.dataset.name + "」？")) return;
-                var arc = getNpcArchive(); delete arc[btn.dataset.name]; saveWorlds(); refreshNpcList();
-            };
+            btn.onclick = function() { if (!confirm("删除「" + btn.dataset.name + "」？")) return; delete getNpcArchive()[btn.dataset.name]; saveWorlds(); refreshNpcList(); };
         });
     }
 
     function showNpcDetailModal(name) {
         var archive = getNpcArchive(); var npc = archive[name]; if (!npc) return;
         var existing = document.getElementById("tlg-npc-modal"); if (existing) existing.remove();
-        var backdrop = document.createElement("div"); backdrop.id = "tlg-npc-modal";
-        backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:6vh;box-sizing:border-box;overflow-y:auto;";
-        var timelineHtml = (npc.timeline || []).map(function(t, idx) {
-            return '<div style="border-left:2px solid #2a2a3a;padding-left:10px;margin-bottom:8px;">' +
-                '<div style="font-size:10px;color:#5a5a6a;">' + (t.timestamp || "未知时间") + (t.auto ? ' · 自动' : ' · 手动') + '</div>' +
-                '<div style="font-size:12px;color:#a0a0b0;">' + escHtml(t.event) + '</div>' +
-                '</div>';
-        }).join("") || '<div style="color:#5a5a6a;font-style:italic">暂无经历记录。</div>';
+        var mvuData = getMvuNpcData();
+        var mvuHtml = "";
+        if (mvuData && mvuData[name]) {
+            var md = mvuData[name];
+            var rows = Object.keys(md).map(function(k) { return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #1a1a28;"><span style="color:#7a7a8a">' + escHtml(k) + '</span><span style="color:#c0c0c8">' + escHtml(String(Array.isArray(md[k]) ? md[k].join(", ") : md[k])) + '</span></div>'; }).join("");
+            mvuHtml = '<div style="background:#0a0a14;border:1px solid #1a1a28;border-radius:4px;padding:8px;margin-bottom:10px;"><div style="font-size:11px;color:#5a8a5a;margin-bottom:4px;">MVU 实时数据</div>' + rows + '</div>';
+        }
+        var timelineHtml = (npc.timeline || []).slice().reverse().map(function(t, idx) {
+            return '<div style="border-left:2px solid #2a2a3a;padding-left:8px;margin-bottom:6px;">' +
+                '<div style="font-size:9px;color:#5a5a6a;">' + escHtml(t.timestamp || "?") + (t.auto ? ' · 自动' : ' · 手动') + '</div>' +
+                '<div style="font-size:11px;color:#a0a0b0;">' + escHtml(t.event) + '</div></div>';
+        }).join("") || '<div style="color:#5a5a6a;font-style:italic;font-size:11px">暂无经历。</div>';
 
-        backdrop.innerHTML = '<div class="tlg-modal" style="width:520px;max-height:80vh;overflow-y:auto;">' +
-            '<div class="tlg-modal-title">' + escHtml(name) + ' <span style="font-size:12px;color:#7a7a8a">(' + escHtml(npc.role || "") + ')</span></div>' +
-            '<label class="tlg-label">外貌' + (npc.appearance && npc.appearance.locked ? ' 🔒' : '') + '</label>' +
-            '<textarea class="tlg-textarea" id="tlg-npc-appearance" style="min-height:50px">' + escHtml((npc.appearance && npc.appearance.value) || "") + '</textarea>' +
-            '<div class="tlg-row" style="margin-top:4px"><label class="tlg-label" style="margin:0;font-size:10px">锁定（AI不可覆盖）</label><input type="checkbox" id="tlg-npc-app-lock" ' + (npc.appearance && npc.appearance.locked ? "checked" : "") + ' /></div>' +
-            '<label class="tlg-label" style="margin-top:10px">年龄</label>' +
-            '<input class="tlg-input" id="tlg-npc-age" value="' + escHtml((npc.age && npc.age.value) || "") + '" style="margin-bottom:8px" />' +
-            '<label class="tlg-label">身份/职业</label>' +
-            '<input class="tlg-input" id="tlg-npc-role" value="' + escHtml(npc.role || "") + '" style="margin-bottom:10px" />' +
+        var bd = document.createElement("div"); bd.id = "tlg-npc-modal";
+        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;
+padding-top:6vh;box-sizing:border-box;overflow-y:auto;";
+        bd.innerHTML = '<div class="tlg-modal" style="width:520px;max-height:80vh;overflow-y:auto;">' +
+            '<div class="tlg-modal-title">' + escHtml(name) + ' <span style="font-size:11px;color:#7a7a8a">(' + escHtml(npc.role || "") + ')</span></div>' +
+            '<label class="tlg-label">身份/职业</label><input class="tlg-input" id="tlg-npc-role" value="' + escHtml(npc.role || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">外貌（手动）' + (npc.appearance && npc.appearance.locked ? ' 🔒' : '') + '</label>' +
+            '<textarea class="tlg-textarea" id="tlg-npc-app" style="min-height:40px;margin-bottom:4px">' + escHtml((npc.appearance && npc.appearance.value) || "") + '</textarea>' +
+            '<label style="font-size:10px;color:#5a5a6a;display:flex;align-items:center;gap:4px;margin-bottom:10px"><input type="checkbox" id="tlg-npc-app-lock" ' + (npc.appearance && npc.appearance.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖）</label>' +
+            mvuHtml +
             '<div style="font-size:12px;font-weight:600;color:#e8e8f0;margin-bottom:6px;">经历时间线（' + (npc.timeline || []).length + '条）</div>' +
-            '<div style="max-height:200px;overflow-y:auto;margin-bottom:10px;">' + timelineHtml + '</div>' +
+            '<div style="max-height:180px;overflow-y:auto;margin-bottom:10px;padding-right:4px;">' + timelineHtml + '</div>' +
             '<label class="tlg-label">手动添加经历</label>' +
-            '<div class="tlg-row"><input class="tlg-input" id="tlg-npc-new-event" placeholder="发生了什么" style="flex:1" /><input class="tlg-input" id="tlg-npc-new-time" placeholder="时间" style="width:80px" /><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-npc-add-event" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">+</button></div>' +
-            '<div class="tlg-modal-actions" style="margin-top:12px"><button type="button" class="tlg-btn" id="tlg-npc-modal-close">关闭</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-npc-modal-save">保存</button></div></div>';
-        document.body.appendChild(backdrop);
-
-        backdrop.querySelector("#tlg-npc-modal-close").onclick = function() { backdrop.remove(); };
-        backdrop.querySelector("#tlg-npc-modal-save").onclick = function() {
-            npc.appearance = { value: backdrop.querySelector("#tlg-npc-appearance").value, locked: backdrop.querySelector("#tlg-npc-app-lock").checked };
-            npc.age = { value: backdrop.querySelector("#tlg-npc-age").value, locked: false };
-            npc.role = backdrop.querySelector("#tlg-npc-role").value.trim();
-            saveWorlds(); backdrop.remove(); refreshNpcList(); toast("样本已保存。");
+            '<div style="display:flex;gap:6px;margin-bottom:10px;"><input class="tlg-input" id="tlg-npc-evt" placeholder="事件内容" style="flex:1" /><input class="tlg-input" id="tlg-npc-evt-time" placeholder="时间" style="width:70px" /><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-npc-evt-add" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">+</button></div>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-npc-close">关闭</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-npc-save">保存</button></div></div>';
+        document.body.appendChild(bd);
+        bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-npc-save").onclick = function() {
+            npc.role = bd.querySelector("#tlg-npc-role").value.trim();
+            npc.appearance = { value: bd.querySelector("#tlg-npc-app").value, locked: bd.querySelector("#tlg-npc-app-lock").checked };
+            saveWorlds(); bd.remove(); refreshNpcList(); toast("已保存。");
         };
-        backdrop.querySelector("#tlg-npc-add-event").onclick = function() {
-            var evt = backdrop.querySelector("#tlg-npc-new-event").value.trim();
-            if (!evt) return;
-            var time = backdrop.querySelector("#tlg-npc-new-time").value.trim();
+        bd.querySelector("#tlg-npc-evt-add").onclick = function() {
+            var evt = bd.querySelector("#tlg-npc-evt").value.trim(); if (!evt) return;
+            var time = bd.querySelector("#tlg-npc-evt-time").value.trim();
             if (!npc.timeline) npc.timeline = [];
             npc.timeline.push({ event: evt, timestamp: time || getTurnTime() || "", auto: false, createdAt: Date.now() });
-            saveWorlds(); backdrop.remove(); showNpcDetailModal(name);
+            saveWorlds(); bd.remove(); showNpcDetailModal(name);
         };
-        backdrop.addEventListener("click", function(e) { if (e.target === backdrop) backdrop.remove(); });
+        bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
     }
 
     function showAddNpcModal() {
@@ -1959,7 +1941,7 @@
         if (!name || !name.trim()) return;
         name = name.trim();
         var archive = getNpcArchive();
-        if (archive[name]) { toast("该角色已存在。"); refreshNpcList(); return; }
+        if (archive[name]) { toast("该角色已存在。"); return; }
         archive[name] = { role: "", appearance: { value: "", locked: false }, age: { value: "", locked: false }, timeline: [], tier: "normal", custom: [] };
         saveWorlds(); refreshNpcList(); toast("已添加：" + name);
     }
@@ -1970,34 +1952,101 @@
     function refreshItemsList() {
         var container = document.getElementById("tlg-items-list"); if (!container) return;
         var memories = state.memories || [];
-        // 从所有 memories 中提取物品变动
-        var itemMap = {};
+        // 从 memories 提取物品最新状态
+        var itemMap = {}; // name → { history: [], latestOwner, latestState }
         for (var i = 0; i < memories.length; i++) {
             var items = memories[i].items || [];
             for (var j = 0; j < items.length; j++) {
-                var item = items[j];
-                if (!item.name) continue;
-                if (!itemMap[item.name]) itemMap[item.name] = [];
-                itemMap[item.name].push({
-                    change: item.change || "",
-                    owner: item.owner || "",
-                    state: item.state || "",
-                    turnIdx: memories[i].turnIdx,
-                    timestamp: memories[i].timestamp
-                });
+                var item = items[j]; if (!item.name) continue;
+                if (!itemMap[item.name]) itemMap[item.name] = { history: [], owner: "", state: "", desc: "" };
+                itemMap[item.name].history.push({ change: item.change || "", owner: item.owner || "", state: item.state || "", turnIdx: memories[i].turnIdx, timestamp: memories[i].timestamp });
+                if (item.owner) itemMap[item.name].owner = item.owner;
+                if (item.state) itemMap[item.name].state = item.state;
             }
         }
-        var names = Object.keys(itemMap);
-        if (!names.length) { container.innerHTML = '<div style="color:#5a5a6a;font-style:italic">暂无物品记录。AI每回合自动提取。</div>'; return; }
+        // 也从 worlds 的持久化物品数据中加载（如果有手动编辑过的）
+        var w = currentWorldId && worlds[currentWorldId] ? worlds[currentWorldId] : null;
+        if (w && w.itemOverrides) {
+            var overKeys = Object.keys(w.itemOverrides);
+            for (var oi = 0; oi < overKeys.length; oi++) {
+                var ov = w.itemOverrides[overKeys[oi]];
+                if (!itemMap[overKeys[oi]]) itemMap[overKeys[oi]] = { history: [], owner: "", state: "", desc: "" };
+                if (ov.owner) itemMap[overKeys[oi]].owner = ov.owner;
+                if (ov.state) itemMap[overKeys[oi]].state = ov.state;
+                if (ov.desc) itemMap[overKeys[oi]].desc = ov.desc;
+            }
+        }
 
-        container.innerHTML = names.map(function(name) {
-            var history = itemMap[name];
-            var latest = history[history.length - 1];
-            return '<div class="tlg-archive-card" style="margin-bottom:8px;">' +
-                '<div class="tlg-archive-title">' + escHtml(name) + '</div>' +
-                '<div class="tlg-archive-meta">持有者：' + escHtml(latest.owner || "未知") + ' · 状态：' + escHtml(latest.state || "未知") + ' · ' + history.length + '条变动记录</div>' +
-                '</div>';
-        }).join("");
+        var names = Object.keys(itemMap);
+        if (!names.length) { container.innerHTML = '<div style="color:#5a5a6a;font-style:italic">暂无物品记录。AI自动提取。</div>'; return; }
+
+        // 按持有者分组
+        var byOwner = {};
+        for (var k = 0; k < names.length; k++) {
+            var owner = itemMap[names[k]].owner || "无主/未知";
+            if (!byOwner[owner]) byOwner[owner] = [];
+            byOwner[owner].push({ name: names[k], data: itemMap[names[k]] });
+        }
+
+        var html = "";
+        var owners = Object.keys(byOwner);
+        for (var oi2 = 0; oi2 < owners.length; oi2++) {
+            var ownerName = owners[oi2];
+            var ownerItems = byOwner[ownerName];
+            html += '<div style="margin-bottom:12px;">';
+            html += '<div style="font-size:12px;font-weight:600;color:#9a9aaa;border-bottom:1px solid #1a1a28;padding-bottom:4px;margin-bottom:6px;">' + escHtml(ownerName) + '（' + ownerItems.length + '件）</div>';
+            for (var ii = 0; ii < ownerItems.length; ii++) {
+                var itm = ownerItems[ii];
+                html += '<div class="tlg-archive-card" style="margin-bottom:6px;padding:8px 10px;cursor:pointer;" data-item="' + escHtml(itm.name) + '">';
+                html += '<div style="font-size:12px;color:#e8e8f0;">' + escHtml(itm.name) + '</div>';
+                html += '<div style="font-size:10px;color:#6a6a7a;">状态：' + escHtml(itm.data.state || "未知") + ' · ' + itm.data.history.length + '条变动</div>';
+                if (itm.data.desc) html += '<div style="font-size:10px;color:#5a5a6a;margin-top:2px;">' + escHtml(itm.data.desc.slice(0, 60)) + '</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+        container.innerHTML = html;
+
+        // 点击编辑
+        container.querySelectorAll("[data-item]").forEach(function(el) {
+            el.onclick = function() { showEditItemModal(el.dataset.item, itemMap[el.dataset.item]); };
+        });
+    }
+
+    function showEditItemModal(itemName, itemData) {
+        var existing = document.getElementById("tlg-item-modal"); if (existing) existing.remove();
+        var w = currentWorldId && worlds[currentWorldId] ? worlds[currentWorldId] : null;
+        var override = (w && w.itemOverrides && w.itemOverrides[itemName]) || {};
+
+        var historyHtml = (itemData.history || []).slice().reverse().slice(0, 20).map(function(h) {
+            return '<div style="border-left:2px solid #2a2a3a;padding-left:8px;margin-bottom:4px;">' +
+                '<div style="font-size:9px;color:#5a5a6a;">#' + (h.turnIdx || "?") + '</div>' +
+                '<div style="font-size:11px;color:#a0a0b0;">' + escHtml(h.change) + ' → ' + escHtml(h.owner) + ' / ' + escHtml(h.state) + '</div></div>';
+        }).join("") || '<div style="color:#5a5a6a;font-size:11px;">无变动记录。</div>';
+
+        var bd = document.createElement("div"); bd.id = "tlg-item-modal";
+        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;";
+        bd.innerHTML = '<div class="tlg-modal" style="width:460px;max-height:75vh;overflow-y:auto;">' +
+            '<div class="tlg-modal-title">' + escHtml(itemName) + '</div>' +
+            '<label class="tlg-label">当前持有者</label><input class="tlg-input" id="tlg-item-owner" value="' + escHtml(override.owner || itemData.owner || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">当前状态</label><input class="tlg-input" id="tlg-item-state" value="' + escHtml(override.state || itemData.state || "") + '" style="margin-bottom:8px" />' +
+            '<label class="tlg-label">物品介绍</label><textarea class="tlg-textarea" id="tlg-item-desc" style="min-height:50px;margin-bottom:10px">' + escHtml(override.desc || itemData.desc || "") + '</textarea>' +
+            '<div style="font-size:11px;font-weight:600;color:#e8e8f0;margin-bottom:6px;">变动历史（最近20条）</div>' +
+            '<div style="max-height:150px;overflow-y:auto;margin-bottom:10px;">' + historyHtml + '</div>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-item-close">关闭</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-item-save">保存</button></div></div>';
+        document.body.appendChild(bd);
+        bd.querySelector("#tlg-item-close").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-item-save").onclick = function() {
+            if (!w) { bd.remove(); return; }
+            if (!w.itemOverrides) w.itemOverrides = {};
+            w.itemOverrides[itemName] = {
+                owner: bd.querySelector("#tlg-item-owner").value.trim(),
+                state: bd.querySelector("#tlg-item-state").value.trim(),
+                desc: bd.querySelector("#tlg-item-desc").value.trim()
+            };
+            saveWorlds(); bd.remove(); refreshItemsList(); toast("物品已保存。");
+        };
+        bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
     }
 
     function fetchModelList() {
