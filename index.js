@@ -1796,23 +1796,6 @@ function updateGeoInfoBox() {
     box.style.top = top + "px";
 }
 
-    // 跟随节点在画布中的当前屏幕位置，并保持在容器可视范围内
-    // 关键：node.x/node.y是画布自身坐标系里的偏移，但infobox是挂在wrap下用绝对定位的，
-    // 所以必须先算出画布相对wrap的偏移量，再叠加上去——否则一旦wrap里画布上方/左侧还有别的元素
-    // （标题、按钮等），infobox就会按错误的原点定位，表现为"点击后位置不对/看不到"。
-    var canvasRect = geoCanvas.getBoundingClientRect();
-    var wrapRect = wrap.getBoundingClientRect();
-    var offsetX = canvasRect.left - wrapRect.left;
-    var offsetY = canvasRect.top - wrapRect.top;
-    var screenX = offsetX + canvasRect.width / 2 + geoCamX + node.x * geoCamZoom;
-    var screenY = offsetY + canvasRect.height / 2 + geoCamY + node.y * geoCamZoom;
-    var boxW = box.offsetWidth || 220, boxH = box.offsetHeight || 90;
-    var left = Math.max(8, Math.min(screenX + 24, wrapRect.width - boxW - 8));
-    var top = Math.max(8, Math.min(screenY - boxH / 2, wrapRect.height - boxH - 8));
-    box.style.left = left + "px";
-    box.style.top = top + "px";
-}
-
 function geoHitTest(clientX, clientY) {
     if (!geoCanvas) return null;
     var rect = geoCanvas.getBoundingClientRect();
