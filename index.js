@@ -25,7 +25,7 @@
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
-        digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用标准名（不用\"那个人\"\"她\"等代词）。role填身份标签。state_delta写\"从X变为Y（原因）\"，无变化则null。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",
+        digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用标准名（不用"那个人""她"等代词）。role填身份标签。state_delta用一句完整的叙事句描述该角色在本轮的关键经历，格式为"在[地点][做了什么/发生了什么]，[结果/状态变化]"。示例："在朝露客栈与持刀男子搏斗，右臂被刺伤，从冷静转为警觉"。若角色本轮无实质变化则null。禁止只写数值变动（如"法力-10"），必须写成叙事："施法协助克劳斯突破封印，法力从106消耗至96"。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",
         queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
         digestAutoMode: true, factUnitsMaxCount: 500,
         digestAutoMode: true, digestBatchSize: 1, factUnitsMaxCount: 500,
@@ -1416,7 +1416,7 @@
         if (typeof refreshGeoTree === "function") refreshGeoTree();
     }
 
-    function applyNpcUpdates(characters, lockedWorldId) {
+    function applyNpcUpdates(characters, lockedWorldId, turnTime) {
         if (!characters || !characters.length || !lockedWorldId || !worlds[lockedWorldId]) return;
         if (!worlds[lockedWorldId].npcArchive) worlds[lockedWorldId].npcArchive = {};
         var archive = worlds[lockedWorldId].npcArchive;
@@ -1438,10 +1438,10 @@
             if (ch.state_delta && ch.state_delta !== "null") {
                 archive[ch.name].timeline.push({
                     event: ch.state_delta,
-                    timestamp: getTurnTime() || "",
+                    timestamp: turnTime || getTurnTime() || "",  // 优先用 AI 提取的时间
                     auto: true,
                     createdAt: Date.now()
-                });
+                 });
             }
         }
         saveWorlds();
@@ -1525,8 +1525,7 @@
 
             // 分发到地理和NPC
             if (parsed.location) applyGeoUpdates(parsed.location, lockedWorldId);
-            if (parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId);
-
+            if (parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId, parsed.turn_time || "");
             if (lockedWorldId === currentWorldId) {
                 state.memories = worlds[lockedWorldId].memories;
             }
@@ -2403,6 +2402,8 @@ function showNpcDetailModal(name) {
     document.body.appendChild(bd);
 
     renderNpcTimelineList(document.getElementById("tlg-npc-timeline-list"), npc);
+// 显示时间线条目时
+var timeLabel = item.timestamp || ("第" + (item.turnIdx || "?") + "轮");
 
     bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-save").onclick = function() {
