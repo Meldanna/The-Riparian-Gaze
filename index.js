@@ -1937,10 +1937,10 @@ function showAddGeoModal() {
     var allPaths = getAllGeoPaths();
     var optsHtml = '<option value="">（最高层级）</option>' + allPaths.map(function(p) { return '<option value="' + escHtml(p) + '">' + escHtml(p) + '</option>'; }).join("");
     var bd = tlgModalBackdrop("tlg-geo-modal");
-    bd.innerHTML = '<div class="tlg-modal" style="font-size:13px;max-width:380px;">' +
+    bd.innerHTML = '<div class="tlg-modal">' +
     '<div class="tlg-modal-title">+ 添加地点</div>' +
     tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-name" placeholder="地点名称" />') +
-    tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-desc" style="min-height:60px;max-height:100px;font-size:12px;"></textarea>') +
+    tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-desc"></textarea>') +
     tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-parent">' + optsHtml + '</select>') +
     '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-cur" /> 主角当前位置</label>' +
     tlgActionsRow(tlgBtn("tlg-geo-cancel", "取消") + tlgBtn("tlg-geo-ok", "确认", "primary")) +
@@ -1996,19 +1996,19 @@ function showEditGeoModal(fullPath) {
     }).join("");
 
     var bd = tlgModalBackdrop("tlg-geo-modal");
-    bd.innerHTML = '<div class="tlg-modal" style="font-size:13px;max-width:380px;">' +
-        '<div class="tlg-modal-title">编辑地点</div>' +
-        tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-edit-name" value="' + escHtml(curName) + '" />') +
-        tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-edit-parent">' + optsHtml + '</select>') +
-        tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-edit-desc" style="min-height:60px;max-height:100px;font-size:12px;">' + escHtml(node.desc || "") + '</textarea>') +
-        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;"><input type="checkbox" id="tlg-geo-edit-cur" ' + (node.isCurrent ? "checked" : "") + ' /> 主角当前位置</label>' +
-        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-edit-lock" ' + (node.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖简介）</label>' +
-        tlgActionsRow(
-            tlgBtn("tlg-geo-edit-del", "删除", "danger", "margin-right:auto;") +
-            tlgBtn("tlg-geo-edit-cancel", "取消") +
-            tlgBtn("tlg-geo-edit-save", "保存", "primary")
-        ) +
-        '</div>';
+    bd.innerHTML = '<div class="tlg-modal">' +
+    '<div class="tlg-modal-title">编辑地点</div>' +
+    tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-edit-name" value="' + escHtml(curName) + '" />') +
+    tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-edit-parent">' + optsHtml + '</select>') +
+    tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-edit-desc">' + escHtml(node.desc || "") + '</textarea>') +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;"><input type="checkbox" id="tlg-geo-edit-cur" ' + (node.isCurrent ? "checked" : "") + ' /> 主角当前位置</label>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-edit-lock" ' + (node.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖简介）</label>' +
+    tlgActionsRow(
+        tlgBtn("tlg-geo-edit-del", "删除", "danger", "margin-right:auto;") +
+        tlgBtn("tlg-geo-edit-cancel", "取消") +
+        tlgBtn("tlg-geo-edit-save", "保存", "primary")
+    ) +
+    '</div>';
     document.body.appendChild(bd);
 
     bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
@@ -2239,7 +2239,7 @@ function showNpcDetailModal(name) {
     }
 
     var bd = tlgModalBackdrop("tlg-npc-modal");
-    bd.innerHTML = '<div class="tlg-modal" style="max-width:540px;max-height:82vh;overflow-y:auto;">' +
+    bd.innerHTML = '<div class="tlg-modal">' +
         '<div class="tlg-modal-title">' + escHtml(name) + '</div>' +
         tlgField("身份/职业", '<input type="text" class="tlg-input" id="tlg-npc-role" value="' + escHtml(npc.role || "") + '" />') +
         tlgField("外貌（手动）" + (npc.appearance && npc.appearance.locked ? "（已锁定）" : ""),
@@ -2476,7 +2476,7 @@ function showEditItemModal(itemName, itemData) {
     }).join("") || '<div style="color:rgba(255,255,255,0.45);font-size:11px;">无变动记录。</div>';
 
     var bd = tlgModalBackdrop("tlg-item-modal");
-    bd.innerHTML = '<div class="tlg-modal" style="max-width:460px;max-height:80vh;overflow-y:auto;">' +
+    bd.innerHTML = '<div class="tlg-modal">' +
         '<div class="tlg-modal-title">' + escHtml(itemName) + '</div>' +
         tlgField("物品介绍", '<textarea class="tlg-textarea" id="tlg-item-desc">' + escHtml(override.desc !== undefined ? override.desc : (itemData.desc || "")) + '</textarea>') +
         tlgField("当前状态", '<input type="text" class="tlg-input" id="tlg-item-state" value="' + escHtml(override.state !== undefined ? override.state : (itemData.state || "")) + '" />') +
