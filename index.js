@@ -1600,7 +1600,7 @@
             }
         });
     }
-function runCatchupDigest() {
+    function runCatchupDigest() {
     var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
     var digestUrl = (globalApi.digestUrl || "").trim();
     var digestKey = (globalApi.digestKey || "").trim();
@@ -1611,16 +1611,16 @@ function runCatchupDigest() {
     var batchSize = Math.max(1, globalApi.digestBatchSize || 1);
 
     // 计算已覆盖的最大楼层号
-    var coveredTurns = new Set();
+    var coveredTurns = {};
     var mems = (currentWorldId && worlds[currentWorldId]) ? (worlds[currentWorldId].memories || []) : [];
     for (var i = 0; i < mems.length; i++) {
-        if (typeof mems[i].turnIdx === "number") coveredTurns.add(mems[i].turnIdx);
+    if (typeof mems[i].turnIdx === "number") coveredTurns[mems[i].turnIdx] = true;
     }
 
     // 收集未覆盖楼层（跳过#0开场白）
     var uncovered = [];
     for (var j = 1; j < st.chat.length; j++) {
-        if (coveredTurns.has(j)) continue;
+        if (coveredTurns[j]) continue;
         if (!st.chat[j].mes) continue;
         uncovered.push({ idx: j, msg: st.chat[j] });
     }
@@ -2922,8 +2922,8 @@ function showEditItemModal(itemName, itemData) {
             '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取 → 向量化）</div>' +
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中，与总结并行独立，互不替代[E]字段供样本库，[L]字段供地理库</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
-            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">补全批次大小（每批覆盖 <input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:50px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合）</label></div>' +
-            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">铭刻缓冲（回复后等待 <input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:50px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 秒再执行，0=立即）</label></div>' +
+            '<label class="tlg-label">补全批次大小（每批覆盖N回合）</label><input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:80px;margin-bottom:8px" />' +
+            '<label class="tlg-label">铭刻缓冲（回复后等待N秒再执行，0=立即）</label><input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:80px;margin-bottom:8px" />' +
             '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;margin-bottom:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button>' +
             '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
@@ -2955,7 +2955,7 @@ function showEditItemModal(itemName, itemData) {
             // ─── 重排引擎 ───
             '<div class="tlg-section"><div class="tlg-section-title">重排引擎（Rerank，可选）</div>' +
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">对向量初筛结果进行语义精排。留空则跳过重排，直接从 Top-K 取 Top-N。</div>' +
-            '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
+            '<label class="tlg-label">重排端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-rerank-url" value="' + escHtml(s.rerankUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-rerank-ai" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">重排密钥</label><input class="tlg-input" id="tlg-rerank-key" type="password" value="' + escHtml(s.rerankKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">重排核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-rerank-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-rerank-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
             '<label class="tlg-label">或强制指定</label><input class="tlg-input" id="tlg-rerank-model" value="' + escHtml(s.rerankModel || "") + '" style="margin-bottom:10px" />' +
