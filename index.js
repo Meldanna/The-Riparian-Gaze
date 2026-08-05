@@ -17,7 +17,10 @@
         _jumpedToIdx: null,
         _chatLenAtJump: null
     };
-
+    
+    var _digestTimer = null;
+    var _digestCountdown = 0;
+    var _lastDigestMemoryId = null;
     var globalApi = {
         apiUrl: "", apiKey: "", model: "", modelList: [],
         vectorUrl: "", vectorKey: "", vectorModel: "", vectorModelList: [],
@@ -27,8 +30,7 @@
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
         digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用标准名（不用"那个人""她"等代词）。role填身份标签。state_delta用一句完整的叙事句描述该角色在本轮的关键经历，格式为"在[地点][做了什么/发生了什么]，[结果/状态变化]"。示例："在朝露客栈与持刀男子搏斗，右臂被刺伤，从冷静转为警觉"。若角色本轮无实质变化则null。禁止只写数值变动（如"法力-10"），必须写成叙事："施法协助克劳斯突破封印，法力从106消耗至96"。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",
         queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
-        digestAutoMode: true, factUnitsMaxCount: 500,
-        digestAutoMode: true, digestBatchSize: 1, factUnitsMaxCount: 500,
+        digestAutoMode: true, digestGraceSeconds: 15, digestBatchSize: 1, factUnitsMaxCount: 500,
         rerankUseLLM: false,
         rerankLLMPrompt: "你是\"因果一致性终审官\"，负责对向量检索召回的历史事实单元进行相关性终审评分，筛出真正有用的记忆，过滤噪音。你不生成叙事文本，不改写片段内容，只打分排序。\n\n【输入】\n- 当前语境摘要：{{current_context_summary}}\n- 当前语境时间信息：{{current_time}}（可能为空）\n- 当前语境地点信息：{{current_place}}（可能为空）\n- 待评分事实单元列表（含ID、回合号）：{{candidate_fragments}}\n\n【前置规则：同实体/同物品状态去重（在打分之前执行，优先级最高）】\n1. 将候选片段按其[E]或[I]中出现的实体/物品全称分组。\n2. 组内若存在多条记录同一实体/物品但状态互斥，只保留回合号最新的一条参与后续打分；其余较旧记录标记!HISTORICAL。\n3. 若当前语境包含回忆性触发词（\"想起\"\"曾经\"\"对比之前\"\"记得那时\"\"回忆\"等），则!HISTORICAL记录可重新参评，但ID后保留!HISTORICAL标记。\n4. !HISTORICAL与!CONFLICT是两套独立标记，互不覆盖。\n\n【评分权重准则（总分10分，仅对通过前置规则的片段执行）】\n1. 实体一致性（权重50%，最多5分）：片段中的[I]物品或[E]实体，是否与当前语境完全匹配且状态相关。完全匹配且状态相关：5分。部分匹配：2-3分。无匹配：0分。\n2. 动作连续性（权重30%，最多3分）：该片段的[A]动作或[C]因果，是否构成当前语境中正在发生动作的起因/前序/直接后果。是：2-3分。间接关联：1分。无关：0分。\n3. 环境逻辑（权重20%，最多2分）：片段的[T]时间和[L]地点与当前语境是否兼容。一致或当前信息为空：2分。不确定但不矛盾：1分。明显矛盾：0分，并标记!CONFLICT。\n\n【特殊规则】\n- !CONFLICT片段无论总分多少，强制排在最前。\n- 严禁对片段内容做任何改写、总结或解释。\n- 严禁输出评分依据或分析过程。\n\n【输出格式（唯一允许的格式）】\n按分数从高到低排列的片段ID列表，逗号分隔，标记紧跟ID。\n示例：frag_014!CONFLICT,frag_007,frag_022!HISTORICAL,frag_003\n\n现在开始评分。",
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
@@ -1446,6 +1448,57 @@
         }
         saveWorlds();
     }
+    function startDigestGrace() {
+        cancelDigestGrace();
+        var seconds = Math.max(0, globalApi.digestGraceSeconds || 15);
+        if (seconds === 0) {
+            setTimeout(function() { runDigestRequest(); }, 1000);
+            return;
+        }
+        _digestCountdown = seconds;
+        showDigestGraceUI();
+        _digestTimer = setInterval(function() {
+            _digestCountdown--;
+            updateDigestGraceUI();
+            if (_digestCountdown <= 0) {
+                cancelDigestGrace();
+                runDigestRequest();
+            }
+        }, 1000);
+    }
+
+    function cancelDigestGrace() {
+        if (_digestTimer) { clearInterval(_digestTimer); _digestTimer = null; }
+        _digestCountdown = 0;
+        hideDigestGraceUI();
+    }
+
+    function showDigestGraceUI() {
+        var bar = document.getElementById("tlg-digest-grace-bar");
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.id = "tlg-digest-grace-bar";
+            bar.style.cssText = "position:fixed;bottom:80px;right:16px;z-index:2147483646;background:#0a0a14;border:1px solid #2a2a3a;border-radius:6px;padding:8px 14px;display:flex;align-items:center;gap:10px;font-size:12px;color:#c0c0c8;box-shadow:0 4px 16px rgba(0,0,0,0.6);pointer-events:auto;";
+            bar.innerHTML = '<span id="tlg-digest-grace-text"></span><button type="button" id="tlg-digest-grace-cancel" style="background:none;border:1px solid #3a3a4a;border-radius:3px;color:#e0e0e8;padding:3px 8px;font-size:11px;cursor:pointer;">取消</button>';
+            document.body.appendChild(bar);
+            document.getElementById("tlg-digest-grace-cancel").onclick = function() {
+                cancelDigestGrace();
+                toast("∮ 本轮铭刻已取消。");
+            };
+        }
+        bar.style.display = "flex";
+        updateDigestGraceUI();
+    }
+
+    function updateDigestGraceUI() {
+        var text = document.getElementById("tlg-digest-grace-text");
+        if (text) text.textContent = "∮ 铭刻倒计时 " + _digestCountdown + "s";
+    }
+
+    function hideDigestGraceUI() {
+        var bar = document.getElementById("tlg-digest-grace-bar");
+        if (bar) bar.style.display = "none";
+    }
 
     function runDigestRequest(retryCount) {
         retryCount = retryCount || 0;
@@ -1502,8 +1555,9 @@
 
             // 存入 memories
             if (!worlds[lockedWorldId].memories) worlds[lockedWorldId].memories = [];
+            var newMemId = generateId();
             worlds[lockedWorldId].memories.push({
-                id: generateId(),
+                id: newMemId,
                 turnIdx: turnIdx,
                 timestamp: Date.now(),
                 nodeId: state.currentNodeId,
@@ -1516,6 +1570,7 @@
                 unresolved: parsed.unresolved,
                 importance: parsed.importance
             });
+            _lastDigestMemoryId = newMemId;
 
             // 上限保护
             var maxCount = globalApi.factUnitsMaxCount || 500;
@@ -2868,6 +2923,7 @@ function showEditItemModal(itemName, itemData) {
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中，与总结并行独立，互不替代[E]字段供样本库，[L]字段供地理库</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">补全批次大小（每批覆盖 <input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:50px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合）</label></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">铭刻缓冲（回复后等待 <input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:50px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 秒再执行，0=立即）</label></div>' +
             '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;margin-bottom:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button>' +
             '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
@@ -2991,6 +3047,7 @@ function showEditItemModal(itemName, itemData) {
             globalApi.digestAutoMode = document.getElementById("tlg-digest-auto-toggle").classList.contains("on");
             globalApi.factUnitsMaxCount = Math.max(50, parseInt(document.getElementById("tlg-fact-units-max").value) || 500);
             globalApi.digestBatchSize = Math.max(1, parseInt(document.getElementById("tlg-digest-batch-size").value) || 1);
+            globalApi.digestGraceSeconds = Math.max(0, parseInt(document.getElementById("tlg-digest-grace").value) || 15);
             // 向量API
             globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
             globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
@@ -3035,14 +3092,15 @@ function showEditItemModal(itemName, itemData) {
         });
         document.getElementById("tlg-fetch-rerank-models").addEventListener("click", function () { flashBtn(this); globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim(); globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim(); saveGlobalApi(); fetchRerankModelList(); });
         document.getElementById("tlg-rerank-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-rerank-model").value = this.value; });
-                document.getElementById("tlg-digest-auto-toggle").addEventListener("click", function () {
-                document.getElementById("tlg-digest-catchup-btn").addEventListener("click", function() { flashBtn(this); runCatchupDigest(); });
-                document.getElementById("tlg-digest-batch-size").addEventListener("change", function() { globalApi.digestBatchSize = Math.max(1, parseInt(this.value) || 1); saveGlobalApi(); });
+        document.getElementById("tlg-digest-auto-toggle").addEventListener("click", function () {
             globalApi.digestAutoMode = !globalApi.digestAutoMode;
             this.classList.toggle("on", globalApi.digestAutoMode); saveGlobalApi();
         });
-        document.getElementById("tlg-test-digest-api").addEventListener("click", function () {
-            var url = document.getElementById("tlg-digest-url").value.trim(), key = document.getElementById("tlg-digest-key").value.trim();
+        document.getElementById("tlg-digest-catchup-btn").addEventListener("click", function() { flashBtn(this); runCatchupDigest(); });
+        document.getElementById("tlg-digest-batch-size").addEventListener("change", function() { globalApi.digestBatchSize = Math.max(1, parseInt(this.value) || 1); saveGlobalApi(); });
+        document.getElementById("tlg-digest-grace").addEventListener("change", function() { globalApi.digestGraceSeconds = Math.max(0, parseInt(this.value) || 15); saveGlobalApi(); });
+        document.getElementById("tlg-test-digest-api").addEventListener("click", function () {       
+          var url = document.getElementById("tlg-digest-url").value.trim(), key = document.getElementById("tlg-digest-key").value.trim();
             if (!url) { toast("摘要地址为空"); return; } flashBtn(this); toast("发送摘要探针…");
             fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} })
             .then(function (res) { toast(res.ok ? "✓ 摘要节点联通" : ("✗ 阻断: " + res.status)); })
@@ -3212,9 +3270,9 @@ function showEditItemModal(itemName, itemData) {
                     }
                     applyRecentVisibility();
                     saveCurrentWorld();
-                    // 每回合异步事实抽取
+                // 每回合异步事实抽取（带缓冲期）
                     if (globalApi.digestAutoMode !== false) {
-                        setTimeout(function () { runDigestRequest(); }, 1000);
+                        startDigestGrace();
                     }
                 });
 
@@ -3235,7 +3293,47 @@ function showEditItemModal(itemName, itemData) {
 
                 if (ctx1.eventTypes.MESSAGE_SWIPED) {
                     ctx1.eventSource.on(ctx1.eventTypes.MESSAGE_SWIPED, function (msgIdx) {
-                        if (!isEnabled() || !state.lastAutoSummaryRange) return;
+                        if (!isEnabled()) return;
+
+                        // ── 摘要缓冲期内重试：直接取消 ──
+                        if (_digestTimer) {
+                            cancelDigestGrace();
+                            toast("∮ 检测到重试，铭刻已取消。");
+                        }
+
+                        // ── 摘要已执行但用户重试：撤回最近一条 memory 及 NPC 经历 ──
+                        if (_lastDigestMemoryId && currentWorldId && worlds[currentWorldId]) {
+                            var mems = worlds[currentWorldId].memories || [];
+                            var memIdx = -1;
+                            for (var mi = mems.length - 1; mi >= 0; mi--) {
+                                if (mems[mi].id === _lastDigestMemoryId) { memIdx = mi; break; }
+                            }
+                            if (memIdx >= 0) {
+                                var removedMem = mems.splice(memIdx, 1)[0];
+                                if (removedMem.characters && worlds[currentWorldId].npcArchive) {
+                                    var archive = worlds[currentWorldId].npcArchive;
+                                    for (var ci = 0; ci < removedMem.characters.length; ci++) {
+                                        var chName = removedMem.characters[ci].name;
+                                        if (archive[chName] && archive[chName].timeline && archive[chName].timeline.length) {
+                                            var tl = archive[chName].timeline;
+                                            for (var ti = tl.length - 1; ti >= 0; ti--) {
+                                                if (tl[ti].auto && tl[ti].createdAt >= removedMem.timestamp - 5000) {
+                                                    tl.splice(ti, 1); break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                worlds[currentWorldId].memories = mems;
+                                state.memories = mems;
+                                saveWorlds();
+                                toast("∮ 检测到重试，已撤回最近铭刻及关联经历。");
+                            }
+                            _lastDigestMemoryId = null;
+                        }
+
+                        // ── 原有的总结撤回逻辑 ──
+                        if (!state.lastAutoSummaryRange) return;
                         var range = state.lastAutoSummaryRange;
                         var idx = typeof msgIdx === "number" ? msgIdx : -1;
                         if (idx < 0) { var st4 = getST(); idx = st4 && st4.chat ? st4.chat.length - 1 : -1; }
