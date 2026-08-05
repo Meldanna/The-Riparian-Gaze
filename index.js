@@ -1574,6 +1574,7 @@
     var geoCanvas = null, geoCtx = null;
     var geoCamX = 0, geoCamY = 0, geoCamZoom = 1;
     var geoIsPanning = false, geoPanStartX = 0, geoPanStartY = 0;
+    var geoSelectedNode = null;
 
     function getGeoTree() {
         if (!currentWorldId || !worlds[currentWorldId]) return {};
@@ -1581,28 +1582,56 @@
         return worlds[currentWorldId].geoTree;
     }
 
-    function geoTreeToLayout(tree, depth, slotStart, positions) {
-        var keys = Object.keys(tree);
-        var H_GAP = 160, V_GAP = 100;
-        if (!keys.length) return 0;
-        var totalWidth = 0;
-        for (var i = 0; i < keys.length; i++) {
-            var name = keys[i];
-            var node = tree[name];
-            var childWidth = geoTreeToLayout(node.children || {}, depth + 1, slotStart + totalWidth, positions);
-            var w = Math.max(1, childWidth);
-            positions.push({
-                name: name,
-                desc: node.desc || "",
-                isCurrent: node.isCurrent || false,
-                locked: node.locked || false,
-                x: (slotStart + totalWidth + w / 2) * H_GAP,
-                y: depth * V_GAP + 50,
-                depth: depth
-            });
-            totalWidth += w;
+    // 把嵌套树扁平化为带坐标的节点列表
+    function flattenGeoTree() {
+        var tree = getGeoTree();
+        var nodes = []; // { name, fullPath, desc, isCurrent, locked, depth, parentPath, children[] }
+
+        function walk(subtree, parentPath, depth) {
+            var keys = Object.keys(subtree);
+            for (var i = 0; i < keys.length; i++) {
+                var name = keys[i];
+                var node = subtree[name];
+                var fullPath = parentPath ? parentPath + "/" + name : name;
+                var childKeys = Object.keys(node.children || {});
+                nodes.push({
+                    name: name,
+                    fullPath: fullPath,
+                    desc: node.desc || "",
+                    isCurrent: node.isCurrent || false,
+                    locked: node.locked || false,
+                    depth: depth,
+                    parentPath: parentPath,
+                    childCount: childKeys.length
+                });
+                if (node.children) walk(node.children, fullPath, depth + 1);
+            }
         }
-        return totalWidth || 1;
+        walk(tree, "", 0);
+        return nodes;
+    }
+
+    // 分配坐标（横向排列同层级）
+    function layoutGeoNodes(nodes) {
+        // 按层级分组
+        var byDepth = {};
+        for (var i = 0; i < nodes.length; i++) {
+            var d = nodes[i].depth;
+            if (!byDepth[d]) byDepth[d] = [];
+            byDepth[d].push(nodes[i]);
+        }
+        var H_GAP = 160, V_GAP = 110;
+        var depths = Object.keys(byDepth).map(Number).sort(function(a,b){ return a-b; });
+        for (var di = 0; di < depths.length; di++) {
+            var row = byDepth[depths[di]];
+            var totalWidth = row.length * H_GAP;
+            var startX = -totalWidth / 2 + H_GAP / 2;
+            for (var ri = 0; ri < row.length; ri++) {
+                row[ri].x = startX + ri * H_GAP;
+                row[ri].y = depths[di] * V_GAP + 60;
+            }
+        }
+        return nodes;
     }
 
     function renderGeoCanvas() {
@@ -1613,55 +1642,65 @@
         geoCanvas.width = rect.width * dpr;
         geoCanvas.height = rect.height * dpr;
         geoCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        geoCtx.fillStyle = "#000000";
+        geoCtx.fillStyle = "#050508";
         geoCtx.fillRect(0, 0, rect.width, rect.height);
 
-        var tree = getGeoTree();
-        var positions = [];
-        geoTreeToLayout(tree, 0, 0, positions);
+        var nodes = layoutGeoNodes(flattenGeoTree());
+        if (!nodes.length) {
+            geoCtx.fillStyle = "#5a5a6a";
+            geoCtx.font = "13px sans-serif";
+            geoCtx.textAlign = "center";
+            geoCtx.fillText("暂无地理数据。点击「+ 添加地点」创建。", rect.width / 2, rect.height / 2);
+            return;
+        }
 
         geoCtx.save();
-        geoCtx.translate(rect.width / 2 + geoCamX, 40 + geoCamY);
+        geoCtx.translate(rect.width / 2 + geoCamX, geoCamY + 30);
         geoCtx.scale(geoCamZoom, geoCamZoom);
 
-        var NODE_R = 16;
+        var NODE_R = 18;
 
-        // 绘制连线
-        function drawEdges(subtree, parentPos) {
-            var keys = Object.keys(subtree);
-            for (var i = 0; i < keys.length; i++) {
-                var childPos = positions.find(function(p) { return p.name === keys[i] && p.depth === (parentPos ? parentPos.depth + 1 : 0); });
-                if (parentPos && childPos) {
-                    geoCtx.beginPath();
-                    geoCtx.moveTo(parentPos.x, parentPos.y + NODE_R);
-                    var cy = (parentPos.y + childPos.y) / 2;
-                    geoCtx.bezierCurveTo(parentPos.x, cy, childPos.x, cy, childPos.x, childPos.y - NODE_R);
-                    geoCtx.strokeStyle = "rgba(140,180,140,0.4)";
-                    geoCtx.lineWidth = 1.5;
-                    geoCtx.stroke();
-                }
-                var node = subtree[keys[i]];
-                if (node.children) {
-                    drawEdges(node.children, childPos);
-                }
-            }
-        }
-        drawEdges(tree, null);
+        // 建立 fullPath → 坐标 的索引
+        var posMap = {};
+        for (var i = 0; i < nodes.length; i++) posMap[nodes[i].fullPath] = nodes[i];
 
-        // 绘制节点
-        for (var j = 0; j < positions.length; j++) {
-            var p = positions[j];
+        // 画连线
+        for (var j = 0; j < nodes.length; j++) {
+            var n = nodes[j];
+            if (!n.parentPath) continue;
+            var parent = posMap[n.parentPath];
+            if (!parent) continue;
             geoCtx.beginPath();
-            geoCtx.arc(p.x, p.y, NODE_R, 0, Math.PI * 2);
-            if (p.isCurrent) {
-                geoCtx.fillStyle = "rgba(100,220,100,0.2)";
-                geoCtx.strokeStyle = "#66dd66";
+            geoCtx.moveTo(parent.x, parent.y + NODE_R);
+            var cy = (parent.y + n.y) / 2;
+            geoCtx.bezierCurveTo(parent.x, cy, n.x, cy, n.x, n.y - NODE_R);
+            geoCtx.strokeStyle = "rgba(100,160,100,0.35)";
+            geoCtx.lineWidth = 1.5;
+            geoCtx.stroke();
+        }
+
+        // 画节点
+        for (var k = 0; k < nodes.length; k++) {
+            var nd = nodes[k];
+            var isSelected = geoSelectedNode === nd.fullPath;
+
+            geoCtx.beginPath();
+            geoCtx.arc(nd.x, nd.y, NODE_R, 0, Math.PI * 2);
+
+            if (nd.isCurrent) {
+                geoCtx.fillStyle = "rgba(80,200,80,0.15)";
+                geoCtx.strokeStyle = "#55cc55";
                 geoCtx.lineWidth = 2;
-                geoCtx.shadowColor = "rgba(100,220,100,0.6)";
-                geoCtx.shadowBlur = 12;
+                geoCtx.shadowColor = "rgba(80,200,80,0.5)";
+                geoCtx.shadowBlur = 10;
+            } else if (isSelected) {
+                geoCtx.fillStyle = "rgba(180,180,200,0.12)";
+                geoCtx.strokeStyle = "#a0a0c0";
+                geoCtx.lineWidth = 2;
+                geoCtx.shadowBlur = 0;
             } else {
-                geoCtx.fillStyle = "rgba(140,180,140,0.08)";
-                geoCtx.strokeStyle = "rgba(140,180,140,0.4)";
+                geoCtx.fillStyle = "rgba(120,160,120,0.06)";
+                geoCtx.strokeStyle = "rgba(120,160,120,0.35)";
                 geoCtx.lineWidth = 1;
                 geoCtx.shadowBlur = 0;
             }
@@ -1670,40 +1709,82 @@
             geoCtx.shadowBlur = 0;
 
             // 标签
-            geoCtx.fillStyle = p.isCurrent ? "#66dd66" : "rgba(180,200,180,0.7)";
-            geoCtx.font = p.isCurrent ? "bold 10px sans-serif" : "10px sans-serif";
+            geoCtx.fillStyle = nd.isCurrent ? "#55cc55" : isSelected ? "#c0c0d0" : "rgba(160,180,160,0.7)";
+            geoCtx.font = nd.isCurrent ? "bold 10px sans-serif" : "10px sans-serif";
             geoCtx.textAlign = "center";
             geoCtx.textBaseline = "top";
-            var label = p.name.length > 8 ? p.name.slice(0, 7) + "…" : p.name;
-            geoCtx.fillText(label, p.x, p.y + NODE_R + 4);
-            if (p.isCurrent) {
-                geoCtx.fillStyle = "rgba(100,220,100,0.5)";
-                geoCtx.font = "8px sans-serif";
-                geoCtx.fillText("📍 当前", p.x, p.y - NODE_R - 12);
+            var label = nd.name.length > 10 ? nd.name.slice(0, 9) + "…" : nd.name;
+            geoCtx.fillText(label, nd.x, nd.y + NODE_R + 4);
+
+            if (nd.isCurrent) {
+                geoCtx.fillStyle = "rgba(80,200,80,0.6)";
+                geoCtx.font = "9px sans-serif";
+                geoCtx.fillText("📍", nd.x, nd.y - NODE_R - 12);
             }
         }
+
         geoCtx.restore();
     }
 
-    function initGeoCanvas() {
-        geoCanvas = document.getElementById("tlg-geo-canvas");
-        if (!geoCanvas) return;
-        geoCtx = geoCanvas.getContext("2d");
+    function geoHitTest(clientX, clientY) {
+        if (!geoCanvas) return null;
+        var rect = geoCanvas.getBoundingClientRect();
+        var mx = (clientX - rect.left - rect.width / 2 - geoCamX) / geoCamZoom;
+        var my = (clientY - rect.top - geoCamY - 30) / geoCamZoom;
+        var nodes = layoutGeoNodes(flattenGeoTree());
+        var NODE_R = 18;
+        for (var i = 0; i < nodes.length; i++) {
+            var dx = mx - nodes[i].x, dy = my - nodes[i].y;
+            if (dx * dx + dy * dy <= (NODE_R + 4) * (NODE_R + 4)) return nodes[i].fullPath;
+        }
+        return null;
+    }
 
-        geoCanvas.addEventListener("mousedown", function(e) {
-            geoIsPanning = true; geoPanStartX = e.clientX - geoCamX; geoPanStartY = e.clientY - geoCamY;
-            geoCanvas.style.cursor = "grabbing";
+    function showGeoInfoPanel(fullPath) {
+        var tree = getGeoTree();
+        var parts = fullPath.split("/");
+        var cur = tree;
+        var node = null;
+        for (var i = 0; i < parts.length; i++) {
+            if (!cur[parts[i]]) return;
+            node = cur[parts[i]];
+            cur = node.children || {};
+        }
+        if (!node) return;
+        geoSelectedNode = fullPath;
+        renderGeoCanvas();
+        // 简介 toast
+        var info = "📍 " + fullPath;
+        if (node.desc) info += "\n" + node.desc;
+        if (node.isCurrent) info += "\n（主角当前位置）";
+        toast(info, 4000);
+    }
+
+    function initGeoCanvas() {
+        var c = document.getElementById("tlg-geo-canvas");
+        if (!c || c === geoCanvas) { renderGeoCanvas(); return; }
+        geoCanvas = c;
+        geoCtx = c.getContext("2d");
+
+        c.addEventListener("mousedown", function(e) {
+            var hit = geoHitTest(e.clientX, e.clientY);
+            if (hit) { showGeoInfoPanel(hit); return; }
+            geoIsPanning = true;
+            geoPanStartX = e.clientX - geoCamX;
+            geoPanStartY = e.clientY - geoCamY;
+            c.style.cursor = "grabbing";
         });
-        geoCanvas.addEventListener("mousemove", function(e) {
+        c.addEventListener("mousemove", function(e) {
             if (!geoIsPanning) return;
-            geoCamX = e.clientX - geoPanStartX; geoCamY = e.clientY - geoPanStartY;
+            geoCamX = e.clientX - geoPanStartX;
+            geoCamY = e.clientY - geoPanStartY;
             renderGeoCanvas();
         });
-        geoCanvas.addEventListener("mouseup", function() { geoIsPanning = false; geoCanvas.style.cursor = "grab"; });
-        geoCanvas.addEventListener("mouseleave", function() { geoIsPanning = false; geoCanvas.style.cursor = "grab"; });
-        geoCanvas.addEventListener("wheel", function(e) {
+        c.addEventListener("mouseup", function() { geoIsPanning = false; c.style.cursor = "grab"; });
+        c.addEventListener("mouseleave", function() { geoIsPanning = false; c.style.cursor = "grab"; });
+        c.addEventListener("wheel", function(e) {
             e.preventDefault();
-            geoCamZoom = Math.max(0.2, Math.min(4, geoCamZoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+            geoCamZoom = Math.max(0.2, Math.min(5, geoCamZoom * (e.deltaY < 0 ? 1.1 : 0.9)));
             renderGeoCanvas();
         }, { passive: false });
 
@@ -1712,29 +1793,62 @@
 
     function refreshGeoTree() { renderGeoCanvas(); }
 
+    // 获取所有地理条目的 fullPath 列表（供选择上级用）
+    function getAllGeoPaths() {
+        var paths = [];
+        var nodes = flattenGeoTree();
+        for (var i = 0; i < nodes.length; i++) paths.push(nodes[i].fullPath);
+        return paths;
+    }
+
     function showAddGeoModal() {
         var existing = document.getElementById("tlg-geo-modal"); if (existing) existing.remove();
+        var allPaths = getAllGeoPaths();
+        var optionsHtml = '<option value="">（设为最高层级）</option>';
+        for (var i = 0; i < allPaths.length; i++) {
+            optionsHtml += '<option value="' + escHtml(allPaths[i]) + '">' + escHtml(allPaths[i]) + '</option>';
+        }
+
         var backdrop = document.createElement("div"); backdrop.id = "tlg-geo-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;";
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">+ 添加地点</div>' +
-            '<label class="tlg-label">路径（用 / 分隔层级，如：青州/云隐镇/朝露客栈）</label><input class="tlg-input" id="tlg-geo-path-input" placeholder="一级/二级/三级" style="margin-bottom:10px" />' +
-            '<label class="tlg-label">简介</label><textarea class="tlg-textarea" id="tlg-geo-desc-input" style="min-height:60px"></textarea>' +
-            '<div class="tlg-row" style="margin-top:8px"><label class="tlg-label" style="margin:0">标记为主角当前位置</label><input type="checkbox" id="tlg-geo-iscurrent" /></div>' +
-            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-geo-modal-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-modal-ok">确认</button></div></div>';
+        backdrop.innerHTML = '<div class="tlg-modal" style="background:#0a0a14;border:1px solid #2a2a3a;color:#c0c0c8;">' +
+            '<div class="tlg-modal-title" style="color:#e8e8f0;">+ 添加地点</div>' +
+            '<label class="tlg-label" style="color:#7a7a8a;">地点名称</label>' +
+            '<input class="tlg-input" id="tlg-geo-name-input" placeholder="如：朝露客栈" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;margin-bottom:10px" />' +
+            '<label class="tlg-label" style="color:#7a7a8a;">简介（可选）</label>' +
+            '<textarea class="tlg-textarea" id="tlg-geo-desc-input" placeholder="该地点的描述…" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;min-height:50px;margin-bottom:10px"></textarea>' +
+            '<label class="tlg-label" style="color:#7a7a8a;">上级地理（选择父级，或留空设为最高层级）</label>' +
+            '<select class="tlg-select" id="tlg-geo-parent-select" style="background:#0e0e18;border-color:#2a2a3a;color:#c0c0c8;margin-bottom:10px;max-height:150px;">' + optionsHtml + '</select>' +
+            '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">' +
+            '<label style="font-size:11px;color:#7a7a8a;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="tlg-geo-iscurrent" /> 标记为主角当前位置</label>' +
+            '</div>' +
+            '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-geo-modal-cancel" style="border-color:#2a2a3a;color:#c0c0c8;">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-modal-ok">确认添加</button></div>' +
+            '</div>';
         document.body.appendChild(backdrop);
+
         backdrop.querySelector("#tlg-geo-modal-cancel").onclick = function() { backdrop.remove(); };
         backdrop.querySelector("#tlg-geo-modal-ok").onclick = function() {
-            var pathStr = backdrop.querySelector("#tlg-geo-path-input").value.trim();
-            if (!pathStr) { toast("路径不能为空。"); return; }
-            var path = pathStr.split("/").map(function(s) { return s.trim(); }).filter(Boolean);
+            var name = backdrop.querySelector("#tlg-geo-name-input").value.trim();
+            if (!name) { toast("名称不能为空。"); return; }
             var desc = backdrop.querySelector("#tlg-geo-desc-input").value.trim();
+            var parentPath = backdrop.querySelector("#tlg-geo-parent-select").value;
             var isCurrent = backdrop.querySelector("#tlg-geo-iscurrent").checked;
+
+            // 构建 path 数组
+            var path;
+            if (parentPath) {
+                path = parentPath.split("/").concat([name]);
+            } else {
+                path = [name];
+            }
+
             applyGeoUpdates({ path: path, desc: desc, is_current: isCurrent, moved_from: null }, currentWorldId);
             backdrop.remove();
-            toast("地点已添加。");
+            toast("地点已添加：" + path.join("/"));
             renderGeoCanvas();
         };
         backdrop.addEventListener("click", function(e) { if (e.target === backdrop) backdrop.remove(); });
+        setTimeout(function() { backdrop.querySelector("#tlg-geo-name-input").focus(); }, 80);
     }
 
     // ══════════════════════════════════════
