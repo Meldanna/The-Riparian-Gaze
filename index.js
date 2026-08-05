@@ -1905,7 +1905,8 @@
         }).join("") || '<div style="color:#5a5a6a;font-style:italic;font-size:11px">暂无经历。</div>';
 
         var bd = document.createElement("div"); bd.id = "tlg-npc-modal";
-        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:6vh;box-sizing:border-box;overflow-y:auto;";
+        bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;
+padding-top:6vh;box-sizing:border-box;overflow-y:auto;";
         bd.innerHTML = '<div class="tlg-modal" style="width:520px;max-height:80vh;overflow-y:auto;">' +
             '<div class="tlg-modal-title">' + escHtml(name) + ' <span style="font-size:11px;color:#7a7a8a">(' + escHtml(npc.role || "") + ')</span></div>' +
             '<label class="tlg-label">身份/职业</label><input class="tlg-input" id="tlg-npc-role" value="' + escHtml(npc.role || "") + '" style="margin-bottom:8px" />' +
