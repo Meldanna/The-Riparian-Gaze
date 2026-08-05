@@ -3068,7 +3068,7 @@ function showEditItemModal(itemName, itemData) {
             globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
             globalApi.rerankUseLLM = document.getElementById("tlg-rerank-use-llm").classList.contains("on");
             globalApi.rerankLLMPrompt = document.getElementById("tlg-rerank-llm-prompt").value;
-            saveGlobalApi(); toast(⚙"引擎设置已锚定");
+            saveGlobalApi(); toast("引擎设置已锚定");
         });
 
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
