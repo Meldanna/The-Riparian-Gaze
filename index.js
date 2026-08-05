@@ -10,7 +10,7 @@
         currentNodeId: null,
         selectedNodeId: null,
         summaries: [],
-        factUnits: [],
+        memories: [],
         turnsSinceAnchor: 0,
         _lastChatLen: 0,
         lastAutoSummaryRange: null,
@@ -25,7 +25,7 @@
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
-        digestPrompt: "你是\"因果解析阵列\"，一个只做结构化抽取、不做创作的事实提炼引擎。\n\n【时间处理规则】\n- 本回合的系统时间为：{{turn_time}}（由调用层提供，若为空则从正文提取）\n- [T] 字段的填写优先级：\n  1. 首先使用调用层提供的系统时间 {{turn_time}} 作为基准\n  2. 在此基准上叠加正文中出现的相对时间描述（如\"上午\"\"入夜后\"\"过了半柱香\"）来细化\n  3. 如果正文中出现的时间描述能独立成立（如\"子时三刻\"\"暴雨初歇的清晨\"），直接使用\n  4. 如果系统时间为空且正文也没有时间信息，填 NULL\n- 一个回合内如果跨越了多个时间段（如从上午到下午），不同时间段的事实必须拆分为不同条目，各自标注各自的时间\n\n【任务】\n将给定的叙事文本解构为若干个独立的\"事实单元\"（Fact Unit）。每个事实单元必须严格包含以下六个维度，缺失的维度填入 NULL，禁止编造：\n\n[T] Time：按上述时间处理规则填写。\n\n[L] Location：本条事实发生的具体地理位置，用\"/\"分隔层级（如\"青州/云隐镇/朝露客栈/二楼天字房\"）。层级从大到小，越具体越好。若存在位置移动，写\"起点→终点\"（各自用\"/\"写完整层级）。若原文未给出地点信息，填 NULL。\n\n[E] Entities：参与本条事实的所有角色。每个角色单独列出，格式为\"姓名（身份标签）：本条中的状态变化描述\"。注意是\"变化\"不是\"最终状态\"——写清楚从什么变成什么，如果本条内没变化但参与了动作，写当前维持的状态。多个角色用\"；\"分隔。\n示例：林夜（主角）：右臂被刺伤，从健康变为负伤/从冷静变为警觉；苏晚（NPC·术士）：法力从充盈消耗至约八成/态度为主动援助\n\n[I] Items：物品的获得/失去/损毁/移交/使用/状态改变。每个物品单独列出，格式为\"物品全称 → 变动类型 → 变动前持有者及状态 → 变动后持有者及状态\"。禁止用代词。多个物品用\"；\"分隔。若无物品变动填 NULL。\n\n[A] Actions：发生的动作事实。格式固定为 [主语]对[目标]执行[具体动作]，结果为[直接结果]。只保留动词性事实，删除所有形容词、比喻、心理描写。一个事实单元内若含多个连续动作（必须共享同一个 [T] 和 [L]），按时间顺序用\"→\"连接。\n\n[C] Consequence：该动作导致的不可逆因果结果或状态锁定。必须是\"已经发生/已经改变\"的状态，不是预测或伏笔。若因果结果尚未显现，填 NULL。若某个结果对后续剧情有重大影响，在末尾加标记 [!重要]。\n\n【切片边界判定】\n不预设\"一回合等于一条\"。输出条数由原文中实际存在的独立事实数量决定——可能是1条，也可能是几十条。\n\n命中以下任一信号，必须另起一条：\n1. 时间变化：出现新的时间描述，且之后的事实不再和前面共享同一个因果结果。\n2. 地点变化：事实发生的地理位置改变了，且新位置上发生了新的独立事件。\n3. 因果并行：同一时间窗口内存在两组互不影响的动作线。\n4. 多实体独立状态变化：2个及以上不同角色各自发生独立的状态变化。\n5. 多物品独立变动：2个及以上物品分别发生独立的状态变化。\n6. 动作链过长：[A]字段需要超过3个\"→\"才能表达完整。\n7. 因果结果切换：原文出现\"结果\"\"最终\"\"没想到\"\"谁知\"\"紧接着又\"等信号词。\n\n每写完一条，自检：[T]和[L]对这一条里的每一个其他字段是否都同时成立？不成立则继续拆。\n\n【硬性规则】\n1. 严禁输出任何Markdown符号。\n2. 严禁输出解释、总结、标题、开场白或结尾寒暄。\n3. 严禁抒情化改写——你在给数据库写日志。\n4. 找不到依据的维度写NULL，绝不为凑格式而编造。\n5. 每条输出自成一行，字段间用\" | \"分隔，字段顺序固定为T-L-E-I-A-C。\n6. 不要因为担心输出太长而省略——有多少条就输出多少条。\n7. [E]字段中每个角色必须带身份标签（如\"NPC·术士\"\"主角\"），供下游样本库提取。\n8. [L]字段中地理层级必须用\"/\"分隔，供下游地理库提取地点树结构。\n9. [E]字段写\"变化\"不写\"最终状态\"——要体现\"从A到B\"的过程。\n\n【输出格式（唯一允许的格式）】\n[T]: <> | [L]: <> | [E]: <> | [I]: <> | [A]: <> | [C]: <>\n\n现在开始处理以下文本：\n{{context}}",
+        digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用标准名（不用\"那个人\"\"她\"等代词）。role填身份标签。state_delta写\"从X变为Y（原因）\"，无变化则null。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",
         queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
         digestAutoMode: true, factUnitsMaxCount: 500,
         rerankUseLLM: false,
@@ -178,7 +178,7 @@
                 state._jumpedToIdx = null;
                 state._chatLenAtJump = null;
             }
-            state.factUnits = w.factUnits || [];
+            state.memories = w.memories || [];
         } else {
             currentWorldId = null; resetState();
         }
@@ -188,6 +188,7 @@
         if (!currentWorldId || !worlds[currentWorldId]) return;
         worlds[currentWorldId].nodes = JSON.parse(JSON.stringify(state.nodes));
         worlds[currentWorldId].summaries = JSON.parse(JSON.stringify(state.summaries));
+        worlds[currentWorldId].memories = state.memories ? JSON.parse(JSON.stringify(state.memories)) : [];     
         worlds[currentWorldId].currentNodeId = state.currentNodeId;
         worlds[currentWorldId].updatedAt = Date.now();
         saveWorlds(); updateInjectionWithVector();
@@ -1331,9 +1332,9 @@
         }
         nextBatch();
     }
-
-        // ══════════════════════════════════════
-    // 摘要API：每回合事实单元抽取
+    
+    // ══════════════════════════════════════
+    // 摘要API：每回合记忆抽取
     // ══════════════════════════════════════
     function getTurnTime() {
         try {
@@ -1343,76 +1344,106 @@
         } catch (e) { return ""; }
     }
 
-    function parseFactUnits(rawText) {
-        var lines = rawText.split("\n");
-        var units = [];
-        var st = getST();
-        var turnIdx = (st && st.chat) ? Math.max(0, st.chat.length - 1) : 0;
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (!line || line.indexOf("[T]:") === -1) continue;
-            var unit = { raw: line, T: "", L: "", E: "", I: "", A: "", C: "", timestamp: Date.now(), turnIdx: turnIdx };
-            var fields = line.split(" | ");
-            for (var j = 0; j < fields.length; j++) {
-                var f = fields[j].trim();
-                if (f.indexOf("[T]:") === 0) unit.T = f.slice(4).trim();
-                else if (f.indexOf("[L]:") === 0) unit.L = f.slice(4).trim();
-                else if (f.indexOf("[E]:") === 0) unit.E = f.slice(4).trim();
-                else if (f.indexOf("[I]:") === 0) unit.I = f.slice(4).trim();
-                else if (f.indexOf("[A]:") === 0) unit.A = f.slice(4).trim();
-                else if (f.indexOf("[C]:") === 0) unit.C = f.slice(4).trim();
-            }
-            if (unit.T || unit.L || unit.E || unit.A) units.push(unit);
+    function parseMemoryJson(raw) {
+        try {
+            var cleaned = raw.trim()
+                .replace(/^```json\s*/i, "").replace(/^```\s*/i, "")
+                .replace(/```\s*$/i, "").trim();
+            var match = cleaned.match(/\{[\s\S]*\}/);
+            if (match) cleaned = match[0];
+            var obj = JSON.parse(cleaned);
+            return {
+                narrative: typeof obj.narrative === "string" ? obj.narrative : (typeof obj.summary === "string" ? obj.summary : ""),
+                turn_time: obj.turn_time || null,
+                location: obj.location || null,
+                characters: Array.isArray(obj.characters) ? obj.characters : [],
+                items: Array.isArray(obj.items) ? obj.items : [],
+                key_events: Array.isArray(obj.key_events) ? obj.key_events : [],
+                unresolved: Array.isArray(obj.unresolved) ? obj.unresolved : [],
+                importance: typeof obj.importance === "number" ? Math.min(10, Math.max(1, obj.importance)) : 5
+            };
+        } catch (e) {
+            // JSON解析失败：把原始文本当narrative降级
+            return {
+                narrative: raw.slice(0, 3000), turn_time: null, location: null,
+                characters: [], items: [], key_events: [], unresolved: [], importance: 5
+            };
         }
-        return units;
     }
 
-    function extractGeoFromUnits(units) {
-        var geoEntries = [];
-        for (var i = 0; i < units.length; i++) {
-            var L = units[i].L;
-            if (!L || L === "NULL") continue;
-            var parts = L.split("→");
-            for (var p = 0; p < parts.length; p++) {
-                var loc = parts[p].trim();
-                if (loc && loc !== "NULL") {
-                    geoEntries.push({
-                        path: loc,
-                        turnIdx: units[i].turnIdx,
-                        timestamp: units[i].timestamp,
-                        time: units[i].T !== "NULL" ? units[i].T : ""
-                    });
-                }
+    function applyGeoUpdates(location, lockedWorldId) {
+        if (!location || !lockedWorldId || !worlds[lockedWorldId]) return;
+        if (!worlds[lockedWorldId].geoTree) worlds[lockedWorldId].geoTree = {};
+        var tree = worlds[lockedWorldId].geoTree;
+        var path = location.path;
+        if (!Array.isArray(path) || !path.length) return;
+
+        // 清除所有 isCurrent 标记
+        function clearCurrent(obj) {
+            var keys = Object.keys(obj);
+            for (var i = 0; i < keys.length; i++) {
+                obj[keys[i]].isCurrent = false;
+                if (obj[keys[i]].children) clearCurrent(obj[keys[i]].children);
             }
         }
-        return geoEntries;
+        clearCurrent(tree);
+
+        // 沿 path 创建/更新节点
+        var cur = tree;
+        for (var i = 0; i < path.length; i++) {
+            var name = path[i];
+            if (!cur[name]) {
+                cur[name] = { desc: "", locked: false, isCurrent: false, children: {} };
+            }
+            if (i === path.length - 1) {
+                if (!cur[name].locked && location.desc) cur[name].desc = location.desc;
+                if (location.is_current) cur[name].isCurrent = true;
+            }
+            cur = cur[name].children;
+        }
+
+        // 如果有 moved_from，也创建起点路径（不标 isCurrent）
+        if (Array.isArray(location.moved_from) && location.moved_from.length) {
+            var cur2 = tree;
+            for (var j = 0; j < location.moved_from.length; j++) {
+                var n2 = location.moved_from[j];
+                if (!cur2[n2]) cur2[n2] = { desc: "", locked: false, isCurrent: false, children: {} };
+                cur2 = cur2[n2].children;
+            }
+        }
+        saveWorlds();
+        if (typeof refreshGeoTree === "function") refreshGeoTree();
     }
 
-    function extractNPCFromUnits(units) {
-        var npcEntries = [];
-        for (var i = 0; i < units.length; i++) {
-            var E = units[i].E;
-            if (!E || E === "NULL") continue;
-            var chars = E.split("；");
-            for (var c = 0; c < chars.length; c++) {
-                var charStr = chars[c].trim();
-                if (!charStr) continue;
-                // 格式：姓名（身份标签）：变化描述
-                var nameMatch = charStr.match(/^(.+?)（(.+?)）：(.+)$/);
-                if (nameMatch) {
-                    npcEntries.push({
-                        name: nameMatch[1].trim(),
-                        role: nameMatch[2].trim(),
-                        change: nameMatch[3].trim(),
-                        location: (units[i].L && units[i].L !== "NULL") ? units[i].L : "",
-                        time: (units[i].T && units[i].T !== "NULL") ? units[i].T : "",
-                        turnIdx: units[i].turnIdx,
-                        timestamp: units[i].timestamp
-                    });
-                }
+    function applyNpcUpdates(characters, lockedWorldId) {
+        if (!characters || !characters.length || !lockedWorldId || !worlds[lockedWorldId]) return;
+        if (!worlds[lockedWorldId].npcArchive) worlds[lockedWorldId].npcArchive = {};
+        var archive = worlds[lockedWorldId].npcArchive;
+        for (var i = 0; i < characters.length; i++) {
+            var ch = characters[i];
+            if (!ch.name) continue;
+            if (!archive[ch.name]) {
+                archive[ch.name] = {
+                    role: ch.role || "",
+                    appearance: { value: "", locked: false },
+                    age: { value: "", locked: false },
+                    timeline: [],
+                    custom: []
+                };
+            }
+            // 更新 role
+            if (ch.role && !archive[ch.name].role) archive[ch.name].role = ch.role;
+            // 追加时间线
+            if (ch.state_delta && ch.state_delta !== "null") {
+                archive[ch.name].timeline.push({
+                    event: ch.state_delta,
+                    timestamp: getTurnTime() || "",
+                    auto: true,
+                    createdAt: Date.now()
+                });
             }
         }
-        return npcEntries;
+        saveWorlds();
     }
 
     function runDigestRequest(retryCount) {
@@ -1426,68 +1457,91 @@
         var st = getST(); if (!st || !st.chat || !st.chat.length) return;
         ensureWorldExists();
 
-        // 取最新一条AI回复作为本回合内容
+        // 取最新一条AI回复
         var lastMsg = null;
         for (var i = st.chat.length - 1; i >= 0; i--) {
             if (!st.chat[i].is_user && st.chat[i].mes) { lastMsg = st.chat[i]; break; }
         }
         if (!lastMsg) return;
 
-        var turnTime = getTurnTime();
-        var context = (lastMsg.mes || "").trim();
-        if (!context) return;
+        // 也取用户最近一条，提供上下文
+        var userMsg = null;
+        for (var j = st.chat.length - 1; j >= 0; j--) {
+            if (st.chat[j].is_user && st.chat[j].mes) { userMsg = st.chat[j]; break; }
+        }
 
+        var turnTime = getTurnTime();
+        var context = "";
+        if (userMsg) context += (userMsg.name || "User") + ": " + (userMsg.mes || "") + "\n";
+        context += (lastMsg.name || "AI") + ": " + (lastMsg.mes || "");
+
+        var turnTimeHint = turnTime ? "系统提供的当前游戏时间：" + turnTime : "（系统未提供游戏时间，请从正文中提取）";
         var prompt = digestPrompt
-            .replace(/\{\{turn_time\}\}/g, turnTime || "（未知）")
+            .replace(/\{\{turn_time_hint\}\}/g, turnTimeHint)
+            .replace(/\{\{turn_time\}\}/g, turnTime || "")
             .replace(/\{\{context\}\}/g, context);
 
         var lockedWorldId = currentWorldId;
+        var turnIdx = st.chat.length - 1;
 
         fetch(buildEndpoint(digestUrl, "/chat/completions"), {
             method: "POST",
             headers: Object.assign({ "Content-Type": "application/json" }, digestKey ? { Authorization: "Bearer " + digestKey } : {}),
-            body: JSON.stringify({
-                model: digestModel || undefined,
-                messages: [{ role: "user", content: prompt }],
-                max_tokens: 4096
-            })
+            body: JSON.stringify({ model: digestModel || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 4096 })
         }).then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
             return r.json();
         }).then(function (data) {
-            var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            if (!text.trim()) { toast("⚠ 事实单元返回为空。"); return; }
-            var units = parseFactUnits(text);
-            if (!units.length) { toast("⚠ 事实单元解析失败，未识别到有效行。"); return; }
-            if (lockedWorldId && worlds[lockedWorldId]) {
-                if (!worlds[lockedWorldId].factUnits) worlds[lockedWorldId].factUnits = [];
-                if (!worlds[lockedWorldId].geoBuffer) worlds[lockedWorldId].geoBuffer = [];
-                if (!worlds[lockedWorldId].npcBuffer) worlds[lockedWorldId].npcBuffer = [];
-                worlds[lockedWorldId].factUnits = worlds[lockedWorldId].factUnits.concat(units);
-                var maxCount = globalApi.factUnitsMaxCount || 500;
-                if (worlds[lockedWorldId].factUnits.length > maxCount) {
-                    worlds[lockedWorldId].factUnits = worlds[lockedWorldId].factUnits.slice(-maxCount);
-                }
-                var geoEntries = extractGeoFromUnits(units);
-                var npcEntries = extractNPCFromUnits(units);
-                worlds[lockedWorldId].geoBuffer = worlds[lockedWorldId].geoBuffer.concat(geoEntries);
-                worlds[lockedWorldId].npcBuffer = worlds[lockedWorldId].npcBuffer.concat(npcEntries);
-                if (worlds[lockedWorldId].geoBuffer.length > 2000) worlds[lockedWorldId].geoBuffer = worlds[lockedWorldId].geoBuffer.slice(-2000);
-                if (worlds[lockedWorldId].npcBuffer.length > 2000) worlds[lockedWorldId].npcBuffer = worlds[lockedWorldId].npcBuffer.slice(-2000);
-                if (lockedWorldId === currentWorldId) {
-                    state.factUnits = worlds[lockedWorldId].factUnits;
-                }
-                saveWorlds();
-                toast("✓ 事实单元 +" + units.length + " | 地理 +" + geoEntries.length + " | NPC +" + npcEntries.length);
+            var raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            if (!raw.trim()) { toast("⚠ 记忆抽取返回为空。"); return; }
+            var parsed = parseMemoryJson(raw);
+            if (!parsed.narrative) { toast("⚠ 记忆解析失败：无narrative字段。"); return; }
+
+            if (!lockedWorldId || !worlds[lockedWorldId]) return;
+
+            // 存入 memories
+            if (!worlds[lockedWorldId].memories) worlds[lockedWorldId].memories = [];
+            worlds[lockedWorldId].memories.push({
+                id: generateId(),
+                turnIdx: turnIdx,
+                timestamp: Date.now(),
+                nodeId: state.currentNodeId,
+                narrative: parsed.narrative,
+                turn_time: parsed.turn_time,
+                location: parsed.location,
+                characters: parsed.characters,
+                items: parsed.items,
+                key_events: parsed.key_events,
+                unresolved: parsed.unresolved,
+                importance: parsed.importance
+            });
+
+            // 上限保护
+            var maxCount = globalApi.factUnitsMaxCount || 500;
+            if (worlds[lockedWorldId].memories.length > maxCount) {
+                worlds[lockedWorldId].memories = worlds[lockedWorldId].memories.slice(-maxCount);
             }
+
+            // 分发到地理和NPC
+            if (parsed.location) applyGeoUpdates(parsed.location, lockedWorldId);
+            if (parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId);
+
+            if (lockedWorldId === currentWorldId) {
+                state.memories = worlds[lockedWorldId].memories;
+            }
+            saveWorlds();
+
+            var geoCount = parsed.location ? 1 : 0;
+            var npcCount = parsed.characters.length;
+            toast("✓ 记忆 +1 | 地理 +" + geoCount + " | NPC +" + npcCount + " | 重要度 " + parsed.importance);
         }).catch(function (e) {
             console.error("[TLG] Digest:", e);
             if (retryCount < MAX_RETRIES) {
                 var delay = (retryCount + 1) * 3000;
-                toast("⚠ 事实抽取失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
+                toast("⚠ 记忆抽取失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
                 setTimeout(function () { runDigestRequest(retryCount + 1); }, delay);
             } else {
-                toast("✗ 事实抽取最终失败: " + e.message);
+                toast("✗ 记忆抽取最终失败: " + e.message);
             }
         });
     }
