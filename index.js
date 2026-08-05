@@ -28,6 +28,7 @@
         digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用标准名（不用\"那个人\"\"她\"等代词）。role填身份标签。state_delta写\"从X变为Y（原因）\"，无变化则null。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",
         queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
         digestAutoMode: true, factUnitsMaxCount: 500,
+        digestAutoMode: true, digestBatchSize: 1, factUnitsMaxCount: 500,
         rerankUseLLM: false,
         rerankLLMPrompt: "你是\"因果一致性终审官\"，负责对向量检索召回的历史事实单元进行相关性终审评分，筛出真正有用的记忆，过滤噪音。你不生成叙事文本，不改写片段内容，只打分排序。\n\n【输入】\n- 当前语境摘要：{{current_context_summary}}\n- 当前语境时间信息：{{current_time}}（可能为空）\n- 当前语境地点信息：{{current_place}}（可能为空）\n- 待评分事实单元列表（含ID、回合号）：{{candidate_fragments}}\n\n【前置规则：同实体/同物品状态去重（在打分之前执行，优先级最高）】\n1. 将候选片段按其[E]或[I]中出现的实体/物品全称分组。\n2. 组内若存在多条记录同一实体/物品但状态互斥，只保留回合号最新的一条参与后续打分；其余较旧记录标记!HISTORICAL。\n3. 若当前语境包含回忆性触发词（\"想起\"\"曾经\"\"对比之前\"\"记得那时\"\"回忆\"等），则!HISTORICAL记录可重新参评，但ID后保留!HISTORICAL标记。\n4. !HISTORICAL与!CONFLICT是两套独立标记，互不覆盖。\n\n【评分权重准则（总分10分，仅对通过前置规则的片段执行）】\n1. 实体一致性（权重50%，最多5分）：片段中的[I]物品或[E]实体，是否与当前语境完全匹配且状态相关。完全匹配且状态相关：5分。部分匹配：2-3分。无匹配：0分。\n2. 动作连续性（权重30%，最多3分）：该片段的[A]动作或[C]因果，是否构成当前语境中正在发生动作的起因/前序/直接后果。是：2-3分。间接关联：1分。无关：0分。\n3. 环境逻辑（权重20%，最多2分）：片段的[T]时间和[L]地点与当前语境是否兼容。一致或当前信息为空：2分。不确定但不矛盾：1分。明显矛盾：0分，并标记!CONFLICT。\n\n【特殊规则】\n- !CONFLICT片段无论总分多少，强制排在最前。\n- 严禁对片段内容做任何改写、总结或解释。\n- 严禁输出评分依据或分析过程。\n\n【输出格式（唯一允许的格式）】\n按分数从高到低排列的片段ID列表，逗号分隔，标记紧跟ID。\n示例：frag_014!CONFLICT,frag_007,frag_022!HISTORICAL,frag_003\n\n现在开始评分。",
         vectorPrompt: "以下为因果档案库中与当前观测焦点相关的历史切片：\n\n{{context}}\n\n处理规则：\n- 这些是已铭刻的因果事实，不可篡改\n- 当前叙事必须与这些记录在逻辑上连续\n- 若当前事件是某条历史线的后果，自然呈现因果关系\n- 不要直接引用或复述这些档案内容",
@@ -226,7 +227,7 @@
             saveGlobalApi();
         }
         state.nodes = worlds[wid].nodes; state.summaries = worlds[wid].summaries; state.currentNodeId = worlds[wid].currentNodeId;
-        saveWorlds(); toast("已从旧版数据迁移。");
+        saveWorlds(); toast("已从旧版数据迁移");
     }
     function resetState() {
         var rootId = generateId();
@@ -388,7 +389,7 @@
 
 
     function jumpToNode(nodeId) {
-        var node = findNode(nodeId); if (!node) { toast("节点不存在。"); return; }
+        var node = findNode(nodeId); if (!node) { toast("节点不存在"); return; }
         var st = getST();
 
         // ── 跳转前自动总结：不受间隔约束，全部未覆盖楼层都总结 ──
@@ -429,7 +430,7 @@
     }
 
     function showAnchorModal(prefillName) {
-        if (!isEnabled()) { toast("河岸凝视已关闭。"); return; }
+        if (!isEnabled()) { toast("河岸凝视已关闭"); return; }
         var existing = document.getElementById("tlg-anchor-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-anchor-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
@@ -585,22 +586,22 @@
         var body = panel.querySelector(".tlg-brief-body");
         body.innerHTML = '<div style="margin-bottom:8px;font-size:11px;color:#7a7a8a">' + new Date(node.timestamp).toLocaleString() + "</div>" +
             '<div style="margin-bottom:8px;font-size:11px;color:#7a7a8a">消息索引: ' + node.msgIdx + " | " + (node.statData ? "MVU快照 ✓" : "无MVU快照") + "</div>" +
-            '<div style="white-space:pre-wrap;word-break:break-word">' + (node.brief ? escHtml(node.brief) : "<em style='color:#7a7a8a'>暂无描述。</em>") + "</div>" +
+            '<div style="white-space:pre-wrap;word-break:break-word">' + (node.brief ? escHtml(node.brief) : "<em style='color:#7a7a8a'>暂无描述</em>") + "</div>" +
             '<div style="margin-top:12px"><label class="tlg-label">编辑描述</label><textarea class="tlg-textarea" id="tlg-brief-edit" style="min-height:80px">' + escHtml(node.brief || "") + "</textarea>" +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-brief-save" style="margin-top:6px;width:100%!important">保存描述</button></div>';
         body.querySelector("#tlg-brief-save").onclick = function () {
-            flashBtn(this); node.brief = body.querySelector("#tlg-brief-edit").value; saveCurrentWorld(); toast("描述已保存。"); refreshArchive();
+            flashBtn(this); node.brief = body.querySelector("#tlg-brief-edit").value; saveCurrentWorld(); toast("描述已保存"); refreshArchive();
         };
         panel.querySelector(".tlg-brief-footer").innerHTML =
             '<button type="button" class="tlg-btn" id="tlg-brief-rename" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-bottom:6px;width:100%!important;">✎ 重命名</button>' +
-            '<button type="button" class="tlg-btn" id="tlg-brief-pin" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-bottom:6px;width:100%!important;">📌 设为常用路径</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-brief-pin" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-bottom:6px;width:100%!important;">⚙ 设为常用路径</button>' +
             '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此因果</button>';
         panel.querySelector("#tlg-brief-jump").onclick = function () { jumpToNode(nodeId); };
         panel.querySelector("#tlg-brief-rename").onclick = function () {
             var newName = prompt("新节点名称：", node.name);
             if (newName === null) return; newName = newName.trim(); if (!newName) return;
             node.name = newName; panel.querySelector(".tlg-brief-header span").textContent = newName;
-            saveCurrentWorld(); refreshArchive(); renderCanvas(); toast("节点已重命名。");
+            saveCurrentWorld(); refreshArchive(); renderCanvas(); toast("节点已重命名");
         };
         panel.querySelector("#tlg-brief-pin").onclick = function () { showPinPathModal(nodeId); };
     }
@@ -620,7 +621,7 @@
         var existing = document.getElementById("tlg-pin-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-pin-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;";
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">📌 设为常用路径</div>' +
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⚙ 设为常用路径</div>' +
             '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">终点节点：' + escHtml(node.name) + '（可在观测坐标里调整终点）</div>' +
             '<label class="tlg-label">路径名称</label><input class="tlg-input" id="tlg-pin-name" value="' + escHtml(node.name + " 路径") + '" style="margin-bottom:10px" />' +
             '<label class="tlg-label">路径描述</label><textarea class="tlg-textarea" id="tlg-pin-desc" placeholder="手写描述，或点击AI生成…" style="min-height:80px;margin-bottom:10px"></textarea>' +
@@ -651,7 +652,7 @@
 
     function generatePathDesc(nodeId, callback) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim(), model = (globalApi.model || "").trim();
-        if (!apiUrl) { toast("请先配置API地址。"); callback(""); return; }
+        if (!apiUrl) { toast("请先配置API地址"); callback(""); return; }
         var pathIds = getPathToRoot(nodeId);
         var pathNodes = pathIds.map(findNode).filter(Boolean);
         var contextParts = [];
@@ -680,7 +681,7 @@
             }
         }
         var context = contextParts.join("\n\n");
-        if (!context.trim()) { toast("路径上下文为空，无法生成。"); callback(""); return; }
+        if (!context.trim()) { toast("路径上下文为空，无法生成"); callback(""); return; }
         var prompt = (globalApi.pathSummaryPrompt || "").replace("{{context}}", context);
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
@@ -692,7 +693,7 @@
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
             text = text.trim();
             if (text.length < 20) {
-                toast("⚠ AI 生成内容过短（" + text.length + "字），可能上下文不足。");
+                toast("⚠ AI 生成内容过短（" + text.length + "字），可能上下文不足");
             }
             callback(text);
         }).catch(function(e){ toast("生成失败：" + e.message); callback(""); });
@@ -701,7 +702,7 @@
     function refreshPinnedPaths() {
         var container = document.getElementById("tlg-pinned-paths"); if (!container) return;
         var paths = getPinnedPaths();
-        if (!paths.length) { container.innerHTML = '<div style="color:#5a5a6a;font-size:12px;padding:8px 0;">暂无常用路径。点击节点可设置。</div>'; return; }
+        if (!paths.length) { container.innerHTML = '<div style="color:#5a5a6a;font-size:12px;padding:8px 0;">暂无常用路径，点击节点可设置</div>'; return; }
         var nodeOpts = state.nodes.map(function(n){ return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + '</option>'; }).join("");
         container.innerHTML = paths.map(function(p) {
             var endNode = findNode(p.nodeId);
@@ -726,8 +727,8 @@
             btn.onclick = function() {
                 var paths = getPinnedPaths(); var idx = paths.findIndex(function(x){ return x.id === btn.dataset.pid; });
                 if (idx === -1) return;
-                if (!confirm("删除常用路径「" + paths[idx].name + "」？")) return;
-                paths.splice(idx, 1); saveWorlds(); refreshPinnedPaths(); toast("已删除。");
+                if (!confirm("坍缩常用路径「" + paths[idx].name + "」？")) return;
+                paths.splice(idx, 1); saveWorlds(); refreshPinnedPaths(); toast("已坍缩");
             };
         });
     }
@@ -753,7 +754,7 @@
             p.name = backdrop.querySelector("#tlg-pine-name").value.trim() || p.name;
             p.nodeId = backdrop.querySelector("#tlg-pine-node").value || p.nodeId;
             p.userDesc = backdrop.querySelector("#tlg-pine-desc").value.trim();
-            saveWorlds(); backdrop.remove(); refreshPinnedPaths(); toast("路径已更新。");
+            saveWorlds(); backdrop.remove(); refreshPinnedPaths(); toast("路径已更新");
         };
         backdrop.querySelector("#tlg-pine-ai").onclick = function() {
             var self = this; self.disabled = true; self.textContent = "生成中…";
@@ -771,7 +772,7 @@
         var container = document.getElementById("tlg-archive-list"); if (!container) return;
         // 常用路径区块
         refreshPinnedPaths();
-        if (!state.nodes.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">河流静默，因果尚未铭刻。</div>'; return; }
+        if (!state.nodes.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;letter-spacing:1px;">河流静默，因果尚未铭刻</div>'; return; }
         var sorted = state.nodes.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
         container.innerHTML = sorted.map(function (node) {
             var isCurrent = node.id === state.currentNodeId;
@@ -785,9 +786,9 @@
         container.querySelectorAll(".tlg-archive-jump").forEach(function (btn) { btn.onclick = function () { jumpToNode(btn.dataset.nid); }; });
         container.querySelectorAll(".tlg-archive-del").forEach(function (btn) {
             btn.onclick = function () {
-                if (btn.dataset.nid === state.currentNodeId) { toast("无法删除当前所在节点。"); return; }
+                if (btn.dataset.nid === state.currentNodeId) { toast("无法坍缩当前所在节点"); return; }
                 var n = findNode(btn.dataset.nid);
-                if (!confirm("确定删除节点「" + (n ? n.name : "") + "」？")) return;
+                if (!confirm("确定坍缩节点「" + (n ? n.name : "") + "」？")) return;
                 deleteNode(btn.dataset.nid);
             };
         });
@@ -796,7 +797,7 @@
 
     function deleteNode(nodeId) {
         var node = findNode(nodeId); if (!node) return;
-        if (!node.parentId) { toast("无法删除根节点。"); return; }
+        if (!node.parentId) { toast("无法坍缩根节点"); return; }
         var parent = findNode(node.parentId);
         // 将被删节点的子节点重新挂载到父节点
         if (node.children && node.children.length > 0) {
@@ -815,37 +816,37 @@
         state.nodes = state.nodes.filter(function (x) { return x.id !== nodeId; });
         if (state.currentNodeId === nodeId) state.currentNodeId = node.parentId;
         if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
-        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已删除，子节点已重连至父级。");
+        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已坍缩，子节点已重连至上级");
     }
 
     function graftNode(nodeId, newParentId) {
-        if (nodeId === newParentId) { toast("不能嫁接到自身。"); return; }
+        if (nodeId === newParentId) { toast("不能嫁接到自身"); return; }
         var node = findNode(nodeId); if (!node) return;
         function isDescendant(ancestorId, targetId) {
             var n = findNode(targetId); if (!n) return false;
             if (n.parentId === ancestorId) return true;
             return n.parentId ? isDescendant(ancestorId, n.parentId) : false;
         }
-        if (isDescendant(nodeId, newParentId)) { toast("目标节点是此节点的子孙，无法嫁接。"); return; }
+        if (isDescendant(nodeId, newParentId)) { toast("目标节点是此节点的延续，无法嫁接"); return; }
         var oldParent = findNode(node.parentId);
         if (oldParent) oldParent.children = oldParent.children.filter(function (id) { return id !== nodeId; });
-        var newParent = findNode(newParentId); if (!newParent) { toast("目标节点不存在。"); return; }
+        var newParent = findNode(newParentId); if (!newParent) { toast("目标节点不存在"); return; }
         if (newParent.children.indexOf(nodeId) === -1) newParent.children.push(nodeId);
         node.parentId = newParentId;
-        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已嫁接至「" + newParent.name + "」。");
+        saveCurrentWorld(); renderCanvas(); refreshArchive(); toast("节点已嫁接至「" + newParent.name + "」");
     }
 
     function showGraftModal(nodeId) {
         var node = findNode(nodeId); if (!node) return;
         var candidates = state.nodes.filter(function (n) { return n.id !== nodeId; });
-        if (!candidates.length) { toast("没有可嫁接的目标节点。"); return; }
+        if (!candidates.length) { toast("没有可嫁接的目标节点"); return; }
         var existing = document.getElementById("tlg-graft-modal"); if (existing) existing.remove();
         var backdrop = document.createElement("div"); backdrop.id = "tlg-graft-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
         var opts = candidates.map(function (n) { return '<option value="' + escHtml(n.id) + '">' + escHtml(n.name) + (n.id === node.parentId ? " (当前父)" : "") + '</option>'; }).join("");
         backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">⇢ 嫁接节点</div>' +
-            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其子树移动到新父节点下。</div>' +
-            '<label class="tlg-label">选择新父节点</label><select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
+            '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">将「' + escHtml(node.name) + '」及其子树移动到新上级节点下</div>' +
+            '<label class="tlg-label">选择新上级节点</label><select class="tlg-select" id="tlg-graft-target" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
             '<div class="tlg-modal-actions"><button type="button" class="tlg-btn" id="tlg-graft-cancel">取消</button><button type="button" class="tlg-btn tlg-btn-primary" id="tlg-graft-ok">确认嫁接</button></div></div>';
         document.body.appendChild(backdrop);
         var sel = backdrop.querySelector("#tlg-graft-target");
@@ -853,7 +854,7 @@
         if (nonParent) sel.value = nonParent.id;
         backdrop.querySelector("#tlg-graft-cancel").onclick = function () { backdrop.remove(); };
         backdrop.querySelector("#tlg-graft-ok").onclick = function () {
-            if (!sel.value) { toast("请选择目标节点。"); return; }
+            if (!sel.value) { toast("请选择目标节点"); return; }
             graftNode(nodeId, sel.value); backdrop.remove();
         };
         backdrop.addEventListener("click", function (e) { if (e.target === backdrop) backdrop.remove(); });
@@ -866,7 +867,7 @@
         var list = document.getElementById("tlg-summary-list"); if (!list) return;
         var catchupHtml = '<button type="button" class="tlg-btn" id="tlg-summary-catchup-btn" style="width:100%;margin-top:8px;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">📋 补全历史切片</button>';
         if (!state.summaries || !state.summaries.length) {
-            list.innerHTML = '<div style="color:#5a5a6a;padding:20px 0;text-align:center;font-style:italic;">虚空寂寂，尚无因果被铭刻于此。</div>' + catchupHtml;
+            list.innerHTML = '<div style="color:#5a5a6a;padding:20px 0;text-align:center;font-style:italic;">虚空寂寂，尚无因果被铭刻于此</div>' + catchupHtml;
             var cb = document.getElementById("tlg-summary-catchup-btn"); if (cb) cb.addEventListener("click", runCatchupSummary);
             return;
         }
@@ -893,8 +894,8 @@
             '<span id="tlg-sh-count" style="font-size:12px;color:#7a7a8a;white-space:nowrap;">' + (state.summaries ? state.summaries.length : 0) + ' 条</span>' +
             '</div>' +
             '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
-            '<button type="button" class="tlg-btn" id="tlg-vault-catchup" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">📋 补全历史切片</button>' +
-            '<button type="button" class="tlg-btn" id="tlg-vault-compress-range" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🗜 选范围浓缩</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-vault-catchup" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;"> 补全历史切片</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-vault-compress-range" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⧗ 选范围浓缩</button>' +
             '</div>';
         container.innerHTML = ctrlHtml + '<div id="tlg-sh-list"></div>';
         renderSummaryList("");
@@ -908,7 +909,7 @@
         var items = (state.summaries || []).slice().reverse();
         if (keyword) { items = items.filter(function (s) { return (s.text || "").toLowerCase().indexOf(keyword) !== -1; }); }
         var countEl = document.getElementById("tlg-sh-count"); if (countEl) countEl.textContent = items.length + " 条";
-        if (!items.length) { listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">' + (keyword ? "因果之中未见此痕迹。" : "虚空寂寂，尚无因果被铭刻于此。") + '</div>'; return; }
+        if (!items.length) { listWrap.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">' + (keyword ? "因果之中未见此痕迹" : "虚空寂寂，尚无因果被铭刻于此") + '</div>'; return; }
         listWrap.innerHTML = items.map(function (s) {
             var realIdx = state.summaries.indexOf(s);
             var floorInfo = (s.floorFrom >= 0 && s.floorTo >= 0) ? ' · <span style="color:#9999bb;">#' + s.floorFrom + '~#' + s.floorTo + '</span>' : '';
@@ -922,9 +923,9 @@
                 '<textarea style="width:100%;min-height:120px;padding:10px;background:#000;border:1px solid #2a2a3a;border-radius:3px;color:#e0e0e8;font-size:13px;line-height:1.6;resize:vertical;box-sizing:border-box;outline:none;" id="tlg-sh-ta-' + realIdx + '">' + escHtml(s.text) + '</textarea>' +
                 '<button type="button" class="tlg-btn tlg-btn-primary tlg-sh-save" data-idx="' + realIdx + '" style="margin-top:6px;width:100%;writing-mode:horizontal-tb;white-space:nowrap;height:auto;">保存</button></div>' +
                 '<div style="margin-top:10px;display:flex;gap:8px;">' +
-                '<button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✏️ 编辑</button>' +
-                (!s.compressed ? '<button type="button" class="tlg-btn tlg-sh-compress1" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">🗜 单条浓缩</button>' : '') +
-                '<button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✕ 抹除</button>' +
+                '<button type="button" class="tlg-btn tlg-sh-edit" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">✎ 编辑</button>' +
+                (!s.compressed ? '<button type="button" class="tlg-btn tlg-sh-compress1" data-idx="' + realIdx + '" style="font-size:11px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;"> ⧗单条浓缩</button>' : '') +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-sh-del" data-idx="' + realIdx + '" style="font-size:11px;margin-left:auto;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⊖ 抹除</button>' +
                 '</div></div>';
         }).join("");
         listWrap.querySelectorAll(".tlg-sh-edit").forEach(function (btn) {
@@ -940,14 +941,14 @@
                 flashBtn(this); var idx = Number(btn.dataset.idx); var ta = document.getElementById("tlg-sh-ta-" + idx);
                 if (ta && state.summaries[idx]) state.summaries[idx].text = ta.value;
                 saveCurrentWorld(); refreshSummary();
-                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("档案已更新。");
+                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("档案已更新");
             });
         });
         listWrap.querySelectorAll(".tlg-sh-del").forEach(function (btn) {
             btn.addEventListener("click", function () {
                 var idx = Number(btn.dataset.idx); if (!confirm("确定抹除这条记录？")) return;
                 state.summaries.splice(idx, 1); saveCurrentWorld(); refreshSummary();
-                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("已抹除。");
+                var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase()); toast("已抹除");
             });
         });
         listWrap.querySelectorAll(".tlg-sh-compress1").forEach(function(btn) {
@@ -959,7 +960,7 @@
                         state.summaries[idx] = compressed[0];
                         saveCurrentWorld(); refreshSummary();
                         var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase());
-                        toast("单条浓缩完成。");
+                        toast("⧗单条浓缩完成");
                     }
                 });
             });
@@ -968,12 +969,12 @@
 
     function showCompressRangeModal() {
         var existing = document.getElementById("tlg-compress-modal"); if (existing) existing.remove();
-        if (!state.summaries || state.summaries.length < 2) { toast("至少需要2条总结才能选范围浓缩。"); return; }
+        if (!state.summaries || state.summaries.length < 2) { toast("至少需要2条总结才能选范围浓缩"); return; }
         var backdrop = document.createElement("div"); backdrop.id = "tlg-compress-modal";
         backdrop.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
         var maxIdx = state.summaries.length;
         var opts = state.summaries.map(function(s, i) { return '<option value="' + i + '">#' + (i+1) + ' · ' + new Date(s.timestamp).toLocaleDateString() + (s.compressed ? " [已浓缩]" : "") + '</option>'; }).join("");
-        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title">🗜 选范围浓缩</div>' +
+        backdrop.innerHTML = '<div class="tlg-modal"><div class="tlg-modal-title"> 选范围浓缩</div>' +
             '<div style="font-size:12px;color:#7a7a8a;margin-bottom:12px;">选择起止条目，将该范围内的未浓缩条目合并压缩为一条。</div>' +
             '<label class="tlg-label">起始（含）</label><select class="tlg-select" id="tlg-cr-from" style="width:100%;margin-bottom:10px;">' + opts + '</select>' +
             '<label class="tlg-label">结束（含）</label><select class="tlg-select" id="tlg-cr-to" style="width:100%;margin-bottom:16px;">' + opts + '</select>' +
@@ -985,10 +986,10 @@
         backdrop.querySelector("#tlg-cr-cancel").onclick = function() { backdrop.remove(); };
         backdrop.querySelector("#tlg-cr-ok").onclick = function() {
             var from = parseInt(fromSel.value, 10), to = parseInt(toSel.value, 10);
-            if (from > to) { toast("起始不能大于结束。"); return; }
+            if (from > to) { toast("起始不能大于结束"); return; }
             var indices = [];
             for (var i = from; i <= to; i++) { if (!state.summaries[i].compressed) indices.push(i); }
-            if (!indices.length) { toast("所选范围内无未浓缩条目。"); backdrop.remove(); return; }
+            if (!indices.length) { toast("所选范围内无未浓缩条目"); backdrop.remove(); return; }
             backdrop.remove();
             compressSummariesAndReplace(indices);
         };
@@ -998,10 +999,10 @@
     // 浓缩核心：把 indices 对应的总结发给API浓缩，回调返回结果文本
     function compressSummaries(indices, callback) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim(), model = (globalApi.model || "").trim();
-        if (!apiUrl) { toast("请先配置API地址。"); return; }
+        if (!apiUrl) { toast("请先配置API地址"); return; }
         var texts = indices.map(function(i){ return state.summaries[i].text; }).join("\n\n---\n\n");
         var prompt = (globalApi.compressPrompt || "").replace("{{context}}", texts);
-        toast("⏳ 浓缩中…");
+        toast("⧗ 浓缩中…");
         fetch(buildEndpoint(apiUrl, "/chat/completions"), {
             method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKey ? { Authorization: "Bearer " + apiKey } : {}),
             body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
@@ -1022,7 +1023,7 @@
             state.summaries.splice(indices[0], 0, compressed[0]);
             saveCurrentWorld(); refreshSummary();
             var kw = (document.getElementById("tlg-sh-search") || {}).value || ""; renderSummaryList(kw.trim().toLowerCase());
-            toast("✓ 浓缩完成，" + indices.length + " 条合并为 1 条。");
+            toast("✓ 浓缩完成，" + indices.length + " 条合并为 1 条");
         });
     }
 
@@ -1038,7 +1039,7 @@
             if (!state.summaries[i].compressed) indices.push(i);
         }
         if (indices.length < 2) {
-            toast("⚠ 档案库已满（" + state.summaries.length + " 条），已无可浓缩的未浓缩条目，请手动清理。");
+            toast("⚠ 档案库已满（" + state.summaries.length + " 条），已无可浓缩的未浓缩条目，请手动清理");
             return;
         }
         toast("⚙ 档案库已满，自动浓缩最旧 " + indices.length + " 条…");
@@ -1125,7 +1126,7 @@
                 toast("⚠ 向量检索失败，" + (delay / 1000) + "秒后重试 (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
                 setTimeout(function () { _vectorSearchWithRetry(st, vecUrl, vecKey, vecModel, chat, retryCount + 1); }, delay);
             } else {
-                toast("⚠ 向量检索最终失败，回退直接注入。");
+                toast("⚠ 向量检索最终失败，回退直接注入");
                 updateInjection();
             }
         });
@@ -1160,7 +1161,7 @@
                 toast("⚠ 重排失败，" + (delay / 1000) + "秒后重试");
                 setTimeout(function () { _rerankAndInject(st, rerankUrl, rerankKey, rerankModel, query, candidates, retryCount + 1); }, delay);
             } else {
-                toast("⚠ 重排最终失败，使用向量原始排序。");
+                toast("⚠ 重排最终失败，使用向量原始排序");
                 _finalInject(st, candidates);
             }
         });
@@ -1197,8 +1198,8 @@
     function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
-        if (!apiUrl) { toast("切片失败：未设置 API 地址。"); if (typeof onDone === "function") onDone(); return; }
-        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息。"); if (typeof onDone === "function") onDone(); return; }
+        if (!apiUrl) { toast("切片失败：未设置 API 地址"); if (typeof onDone === "function") onDone(); return; }
+        if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息"); if (typeof onDone === "function") onDone(); return; }
 
         var st = getST();
         var firstFloor = -1, lastFloor = -1;
@@ -1214,7 +1215,7 @@
         var prompt = summaryPrompt.replace("{{context}}", recentChat);
         var btn = document.getElementById("tlg-summary-run"); if (btn) btn.disabled = true;
         var label = sourceLabel || (auto ? "自动" : "手动");
-        toast("⏳ " + label + "切片中…" + floorLabel);
+        toast("⧗ " + label + "切片中…" + floorLabel);
         var sendBtn = document.getElementById("send_but");
         if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
 
@@ -1261,7 +1262,7 @@
     function runSummaryWithMessages(messagesArray) { _doSummaryRequest(messagesArray, true, "跳转前"); }
 
     function runSummary(auto) {
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息。"); return; }
+        var st = getST(); if (!st || !st.chat || !st.chat.length) { if (!auto) toast("当前无聊天消息"); return; }
         ensureWorldExists();
         var interval = globalApi.autoInterval || 10;
         var coveredUpTo = _getCoveredUpTo();
@@ -1287,7 +1288,7 @@
     }
 
     function runCatchupSummary() {
-        var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
+        var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息"); return; }
         ensureWorldExists();
         var batchSize = Math.max(1, globalApi.autoInterval || 10);
         // 计算已覆盖的最大楼层号
@@ -1305,7 +1306,7 @@
             if (j <= coveredUpTo) continue;
             uncovered.push(st.chat[j]);
         }
-        if (!uncovered.length) { toast("所有楼层已被覆盖，无需补全。"); return; }
+        if (!uncovered.length) { toast("所有楼层已被覆盖，无需补全"); return; }
         // 分批，最后一批不满 batchSize 则丢弃
         var batches = [];
         for (var k = 0; k < uncovered.length; k += batchSize) {
@@ -1313,8 +1314,8 @@
             if (batch.length < batchSize) break;
             batches.push(batch);
         }
-        if (!batches.length) { toast("未覆盖消息不足 " + batchSize + " 条，暂不补全。"); return; }
-        toast("📋 开始补全历史切片，共 " + batches.length + " 批…");
+        if (!batches.length) { toast("未覆盖消息不足 " + batchSize + " 条，暂不补全"); return; }
+        toast(" 开始补全历史切片，共 " + batches.length + " 批…");
         var sendBtn = document.getElementById("send_but");
         if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
         var catchupBtns = document.querySelectorAll("#tlg-summary-catchup-btn,#tlg-vault-catchup");
@@ -1322,7 +1323,7 @@
         var idx = 0;
         function nextBatch() {
             if (idx >= batches.length) {
-                toast("✓ 历史补全完成，共 " + batches.length + " 批。");
+                toast("✓ 历史补全完成，共 " + batches.length + " 批");
                 if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
                 catchupBtns.forEach(function(b){ b.disabled = false; });
                 return;
@@ -1493,9 +1494,9 @@
             return r.json();
         }).then(function (data) {
             var raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            if (!raw.trim()) { toast("⚠ 记忆抽取返回为空。"); return; }
+            if (!raw.trim()) { toast("⚠ 记忆抽取返回为空"); return; }
             var parsed = parseMemoryJson(raw);
-            if (!parsed.narrative) { toast("⚠ 记忆解析失败：无narrative字段。"); return; }
+            if (!parsed.narrative) { toast("⚠ 记忆解析失败：无narrative字段"); return; }
 
             if (!lockedWorldId || !worlds[lockedWorldId]) return;
 
@@ -1545,10 +1546,127 @@
             }
         });
     }
+function runCatchupDigest() {
+    var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
+    var digestUrl = (globalApi.digestUrl || "").trim();
+    var digestKey = (globalApi.digestKey || "").trim();
+    var digestModel = (globalApi.digestModel || "").trim();
+    var digestPrompt = (globalApi.digestPrompt || "").trim();
+    if (!digestUrl || !digestPrompt) { toast("⚠ 请先配置摘要引擎端点与提示词。"); return; }
+    ensureWorldExists();
+    var batchSize = Math.max(1, globalApi.digestBatchSize || 1);
 
+    // 计算已覆盖的最大楼层号
+    var coveredTurns = new Set();
+    var mems = (currentWorldId && worlds[currentWorldId]) ? (worlds[currentWorldId].memories || []) : [];
+    for (var i = 0; i < mems.length; i++) {
+        if (typeof mems[i].turnIdx === "number") coveredTurns.add(mems[i].turnIdx);
+    }
+
+    // 收集未覆盖楼层（跳过#0开场白）
+    var uncovered = [];
+    for (var j = 1; j < st.chat.length; j++) {
+        if (coveredTurns.has(j)) continue;
+        if (!st.chat[j].mes) continue;
+        uncovered.push({ idx: j, msg: st.chat[j] });
+    }
+    if (!uncovered.length) { toast("所有楼层已有摘要覆盖，无需补全。"); return; }
+
+    // 按 batchSize 分批，每批内的消息合并为一个 context
+    var batches = [];
+    for (var k = 0; k < uncovered.length; k += batchSize) {
+        var batch = uncovered.slice(k, k + batchSize);
+        batches.push(batch);
+    }
+    if (!batches.length) { toast("无可补全内容。"); return; }
+
+    toast("∮ 开始补全历史摘要，共 " + batches.length + " 批…");
+    var sendBtn = document.getElementById("send_but");
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = "0.4"; }
+    var catchupBtns = document.querySelectorAll("#tlg-digest-catchup-btn,#tlg-vault-digest-catchup");
+    catchupBtns.forEach(function(b) { b.disabled = true; });
+
+    var lockedWorldId = currentWorldId;
+    var idx = 0;
+
+    function nextBatch() {
+        if (idx >= batches.length) {
+            toast("✓ 摘要补全完成，共 " + batches.length + " 批。");
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ""; }
+            catchupBtns.forEach(function(b) { b.disabled = false; });
+            return;
+        }
+        var batch = batches[idx]; idx++;
+
+        // 组装 context
+        var context = "";
+        for (var m = 0; m < batch.length; m++) {
+            var msg = batch[m].msg;
+            context += (msg.is_user ? (msg.name || "User") : (msg.name || "AI")) + ": " + (msg.mes || "") + "\n";
+        }
+
+        var turnTime = ""; // 补全时无法获取精确游戏时间，留空让 AI 从正文提取
+        var turnTimeHint = "（系统未提供游戏时间，请从正文中提取）";
+        var prompt = digestPrompt
+            .replace(/\{\{turn_time_hint\}\}/g, turnTimeHint)
+            .replace(/\{\{turn_time\}\}/g, turnTime)
+            .replace(/\{\{context\}\}/g, context);
+
+        var batchTurnIdx = batch[batch.length - 1].idx; // 记录为批次最后一条的楼层号
+
+        fetch(buildEndpoint(digestUrl, "/chat/completions"), {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, digestKey ? { Authorization: "Bearer " + digestKey } : {}),
+            body: JSON.stringify({ model: digestModel || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 4096 })
+        }).then(function(r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        }).then(function(data) {
+            var raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+            if (!raw.trim()) { toast("⚠ 补全批次 " + idx + " 返回为空，跳过。"); nextBatch(); return; }
+            var parsed = parseMemoryJson(raw);
+            if (!parsed.narrative) { toast("⚠ 补全批次 " + idx + " 解析失败，跳过。"); nextBatch(); return; }
+
+            if (!lockedWorldId || !worlds[lockedWorldId]) { nextBatch(); return; }
+            if (!worlds[lockedWorldId].memories) worlds[lockedWorldId].memories = [];
+
+            worlds[lockedWorldId].memories.push({
+                id: generateId(),
+                turnIdx: batchTurnIdx,
+                timestamp: Date.now(),
+                nodeId: state.currentNodeId,
+                narrative: parsed.narrative,
+                turn_time: parsed.turn_time,
+                location: parsed.location,
+                characters: parsed.characters,
+                items: parsed.items,
+                key_events: parsed.key_events,
+                unresolved: parsed.unresolved,
+                importance: parsed.importance
+            });
+
+            // 分发到地理和NPC
+            if (parsed.location) applyGeoUpdates(parsed.location, lockedWorldId);
+            if (parsed.characters && parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId);
+
+            if (lockedWorldId === currentWorldId) {
+                state.memories = worlds[lockedWorldId].memories;
+            }
+            saveWorlds();
+            toast("∮ 补全 " + idx + "/" + batches.length + " 完成");
+            // 延迟 1 秒再发下一批，避免 rate limit
+            setTimeout(nextBatch, 1000);
+        }).catch(function(e) {
+            toast("✗ 补全批次 " + idx + " 失败: " + e.message + "，继续下一批。");
+            setTimeout(nextBatch, 2000);
+        });
+    }
+    nextBatch();
+}
+    
     function fetchDigestModelList() {
         var apiUrl = (globalApi.digestUrl || "").trim(), apiKey = (globalApi.digestKey || "").trim();
-        if (!apiUrl) { toast("请先设置摘要API地址。"); return; }
+        if (!apiUrl) { toast("请先设置摘要API地址"); return; }
         var btn = document.getElementById("tlg-fetch-digest-models"); if (btn) btn.disabled = true;
         toast("检测摘要模型…");
         fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
@@ -1556,7 +1674,7 @@
         .then(function (data) {
             var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
             globalApi.digestModelList = models; saveGlobalApi(); populateDigestModelSelect();
-            toast("已识别 " + models.length + " 个摘要模型。");
+            toast("已识别 " + models.length + " 个摘要模型");
         }).catch(function (e) { toast("通信失败: " + e.message); })
         .then(function () { if (btn) btn.disabled = false; });
     }
@@ -1639,7 +1757,7 @@ function tlgSearchResultItem(cls, dataAttr, dataVal, label, sub) {
         '<div>' + escHtml(label) + '</div>' + (sub ? '<div style="color:rgba(255,255,255,0.5);font-size:10px;margin-top:2px;">' + escHtml(sub) + '</div>' : '') +
         '</div>';
 }
-function tlgSearchEmpty() { return '<div style="color:rgba(255,255,255,0.45);font-size:11px;padding:6px 2px;">无匹配结果。</div>'; }
+function tlgSearchEmpty() { return '<div style="color:rgba(255,255,255,0.45);font-size:11px;padding:6px 2px;">无匹配结果</div>'; }
 
 function getGeoTree() {
     if (!currentWorldId || !worlds[currentWorldId]) return {};
@@ -1782,7 +1900,7 @@ function updateGeoInfoBox() {
             '<div class="tlg-archive-title" style="font-size:13px;">' + escHtml(node.name) +
             (node.isCurrent ? ' <span style="color:#7a7a8a;font-size:11px;">◎ 当前</span>' : '') + '</div>' +
             '<div class="tlg-archive-meta" style="font-size:11px;">' + escHtml(geoSelectedPath) +
-            (node.locked ? ' · 🔒' : '') + '</div>' +
+            (node.locked ? ' · ⊚' : '') + '</div>' +
             '<div class="tlg-archive-brief" style="font-size:12px;max-height:60px;overflow:hidden;">' +
             (node.desc ? escHtml(node.desc) : '<span style="color:#7a7a8a;">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
@@ -1974,7 +2092,7 @@ function showAddGeoModal() {
     document.body.appendChild(bd);
     bd.querySelector("#tlg-geo-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-ok").onclick = function() {
-        var name = bd.querySelector("#tlg-geo-name").value.trim(); if (!name) { toast("名称为空。"); return; }
+        var name = bd.querySelector("#tlg-geo-name").value.trim(); if (!name) { toast("名称为空"); return; }
         var parentPath = bd.querySelector("#tlg-geo-parent").value;
         var path = parentPath ? parentPath.split("/").concat([name]) : [name];
         applyGeoUpdates({ path: path, desc: bd.querySelector("#tlg-geo-desc").value.trim(), is_current: bd.querySelector("#tlg-geo-cur").checked, moved_from: null }, currentWorldId);
@@ -2023,7 +2141,7 @@ function showEditGeoModal(fullPath) {
 
     var bd = tlgModalBackdrop("tlg-geo-modal");
     bd.innerHTML = '<div class="tlg-modal">' +
-    '<div class="tlg-modal-title">编辑地点</div>' +
+    '<div class="tlg-modal-title">铭刻地点</div>' +
     tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-edit-name" value="' + escHtml(curName) + '" />') +
     tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-edit-parent">' + optsHtml + '</select>') +
     tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-edit-desc">' + escHtml(node.desc || "") + '</textarea>') +
@@ -2040,7 +2158,7 @@ function showEditGeoModal(fullPath) {
     bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-edit-save").onclick = function() {
         var newName = bd.querySelector("#tlg-geo-edit-name").value.trim();
-        if (!newName) { toast("名称为空。"); return; }
+        if (!newName) { toast("名称为空"); return; }
         var newParentPath = bd.querySelector("#tlg-geo-edit-parent").value;
         var newFullPath = newParentPath ? newParentPath.split("/").concat([newName]) : [newName];
         var newFullPathStr = newFullPath.join("/");
@@ -2051,7 +2169,7 @@ function showEditGeoModal(fullPath) {
         if (newFullPathStr !== fullPath) {
             var moveResult = moveGeoNode(fullPath, newParentPath, newName);
             if (!moveResult.ok) {
-                toast(moveResult.reason === "duplicate" ? "目标位置已存在同名地点。" : "移动失败。");
+                toast(moveResult.reason === "duplicate" ? "目标位置已存在同名地点" : "移动失败");
                 return;
             }
             var movedNode = getGeoNodeByPath(newFullPathStr);
@@ -2224,7 +2342,7 @@ function refreshNpcList() {
             '<option value="important"' + (tier === "important" ? " selected" : "") + '>重要</option>' +
             '<option value="normal"' + (tier === "normal" ? " selected" : "") + '>普通</option></select>' +
             '<div class="tlg-archive-title" style="flex:1;">' + escHtml(name) + '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="width:auto;height:22px;min-height:0;padding:0 8px;flex:0 0 auto;font-size:11px;">删除</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="width:auto;height:22px;min-height:0;padding:0 8px;flex:0 0 auto;font-size:11px;">坍缩</button>' +
             '</div>' +
             '<div class="tlg-archive-meta">' + escHtml(npc.role || "未知身份") + '</div>' +
             (npc.appearance && npc.appearance.value ? '<div class="tlg-archive-meta">外貌：' + escHtml(npc.appearance.value.slice(0, 50)) + (npc.appearance.value.length > 50 ? "…" : "") + '</div>' : '') +
@@ -2253,7 +2371,7 @@ function refreshNpcList() {
 // 排版顺序：姓名 → 身份 → 外貌(手动) → MVU提取 → 经历时间线(可拖动排序)
 function showNpcDetailModal(name) {
     var archive = getNpcArchive(); var npc = archive[name];
-    if (!npc) { toast("未找到该角色的样本数据。"); return; }
+    if (!npc) { toast("未找到该角色的样本数据"); return; }
     var mvuData = getMvuNpcData();
     var mvuHtml = "";
     if (mvuData && mvuData[name]) {
@@ -2290,7 +2408,7 @@ function showNpcDetailModal(name) {
     bd.querySelector("#tlg-npc-save").onclick = function() {
         npc.role = bd.querySelector("#tlg-npc-role").value.trim();
         npc.appearance = { value: bd.querySelector("#tlg-npc-app").value, locked: bd.querySelector("#tlg-npc-app-lock").checked };
-        saveWorlds(); bd.remove(); refreshNpcList(); toast("已保存。");
+        saveWorlds(); bd.remove(); refreshNpcList(); toast("已铭刻");
     };
     bd.querySelector("#tlg-npc-evt-add").onclick = function() {
         var evt = bd.querySelector("#tlg-npc-evt").value.trim(); if (!evt) return;
@@ -2315,7 +2433,7 @@ function renderNpcTimelineList(container, npc) {
             '<div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(t.timestamp || "?") + (t.auto ? ' · 自动' : ' · 手动') + '</div>' +
             '<div style="font-size:11px;">' + escHtml(t.event) + '</div>' +
             '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 8px;font-size:11px;flex-shrink:0;">删除</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 8px;font-size:11px;flex-shrink:0;">坍缩</button>' +
             '</div>';
     }).join("");
 
@@ -2359,7 +2477,7 @@ function showAddNpcModal() {
     bd.querySelector("#tlg-npc-add-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-add-ok").onclick = function() {
         var name = bd.querySelector("#tlg-npc-add-name").value.trim();
-        if (!name) { toast("名称为空。"); return; }
+        if (!name) { toast("名称为空"); return; }
         var archive = getNpcArchive();
         if (archive[name]) { toast("该样本已存在"); return; }
         archive[name] = {
@@ -2520,26 +2638,26 @@ function showEditItemModal(itemName, itemData) {
             desc: bd.querySelector("#tlg-item-desc").value.trim(),
             deleted: false
         };
-        saveWorlds(); bd.remove(); refreshItemsList(); toast("物品已保存。");
+        saveWorlds(); bd.remove(); refreshItemsList(); toast("物品已铭刻");
     };
     bd.querySelector("#tlg-item-del").onclick = function() {
         if (!confirm("删除物品「" + itemName + "」？（仅从档案列表中移除，不影响已发生的剧情记录）")) return;
         if (!w) { bd.remove(); return; }
         if (!w.itemOverrides) w.itemOverrides = {};
         w.itemOverrides[itemName] = { deleted: true };
-        saveWorlds(); bd.remove(); refreshItemsList(); toast("已删除。");
+        saveWorlds(); bd.remove(); refreshItemsList(); toast("已抹除");
     };
 }
 
     function fetchModelList() {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
-        if (!apiUrl) { toast("请先设置 API 地址。"); return; }
+        if (!apiUrl) { toast("请先设置 API 地址"); return; }
         var btn = document.getElementById("tlg-fetch-models"); if (btn) btn.disabled = true; toast("正在检测可用模型…");
         fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
         .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
-            globalApi.modelList = models; saveGlobalApi(); populateModelSelect(); toast("已识别 " + models.length + " 个核心模型。");
+            globalApi.modelList = models; saveGlobalApi(); populateModelSelect(); toast("已识别 " + models.length + " 个核心模型");
         }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
     }
     function populateModelSelect() {
@@ -2554,7 +2672,7 @@ function showEditItemModal(itemName, itemData) {
         var wid = generateId(); var rootId = generateId();
         worlds[wid] = {
             id: wid, name: name, chatId: chatId,
-            nodes: [{ id: rootId, name: "起源点", brief: "时间线起源。", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] }],
+            nodes: [{ id: rootId, name: "起源点", brief: "时间线起源", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] }],
             summaries: [], currentNodeId: rootId, pinnedPaths: [],
             createdAt: Date.now(), updatedAt: Date.now()
         };
@@ -2564,24 +2682,24 @@ function showEditItemModal(itemName, itemData) {
     }
     function fetchVectorModelList() {
         var apiUrl = (globalApi.vectorUrl || "").trim(), apiKey = (globalApi.vectorKey || "").trim();
-        if (!apiUrl) { toast("请先设置向量 API 地址。"); return; }
+        if (!apiUrl) { toast("请先设置向量 API 地址"); return; }
         var btn = document.getElementById("tlg-fetch-vec-models"); if (btn) btn.disabled = true; toast("检测向量模型…");
         fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
         .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
-            globalApi.vectorModelList = models; saveGlobalApi(); populateVectorModelSelect(); toast("已识别 " + models.length + " 个向量模型。");
+            globalApi.vectorModelList = models; saveGlobalApi(); populateVectorModelSelect(); toast("已识别 " + models.length + " 个向量模型");
         }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
     }
     function fetchRerankModelList() {
         var apiUrl = (globalApi.rerankUrl || "").trim(), apiKey = (globalApi.rerankKey || "").trim();
-        if (!apiUrl) { toast("请先设置重排 API 地址。"); return; }
+        if (!apiUrl) { toast("请先设置重排 API 地址"); return; }
         var btn = document.getElementById("tlg-fetch-rerank-models"); if (btn) btn.disabled = true; toast("检测重排模型…");
         fetch(buildEndpoint(apiUrl, "/models"), { headers: apiKey ? { Authorization: "Bearer " + apiKey } : {} })
         .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
         .then(function (data) {
             var models = (data.data || data.models || []).map(function (m) { return typeof m === "string" ? m : (m.id || m.name || ""); }).filter(Boolean);
-            globalApi.rerankModelList = models; saveGlobalApi(); populateRerankModelSelect(); toast("已识别 " + models.length + " 个重排模型。");
+            globalApi.rerankModelList = models; saveGlobalApi(); populateRerankModelSelect(); toast("已识别 " + models.length + " 个重排模型");
         }).catch(function (e) { toast("通信失败: " + e.message); }).then(function () { if (btn) btn.disabled = false; });
     }
     function populateRerankModelSelect() {
@@ -2596,7 +2714,7 @@ function showEditItemModal(itemName, itemData) {
     function refreshWorlds() {
         var container = document.getElementById("tlg-worlds-list"); if (!container) return;
         var chatId = getCurrentChatId(), ids = Object.keys(worlds).sort(function (a, b) { return (worlds[b].updatedAt || 0) - (worlds[a].updatedAt || 0); });
-        if (!ids.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">万流归虚——尚无被观测的世界。</div>'; return; }
+        if (!ids.length) { container.innerHTML = '<div style="color:#5a5a6a;padding:40px 20px;text-align:center;font-style:italic;">万流归虚——尚无被观测的世界</div>'; return; }
         container.innerHTML = ids.map(function (wid) {
             var w = worlds[wid], isCurrent = wid === currentWorldId, isLinked = w.chatId === chatId && chatId;
             return '<div style="background:#050508;border:1px solid ' + (isCurrent ? "#ffffff" : "#2a2a3a") + ';border-radius:4px;padding:12px;margin-bottom:10px;">' +
@@ -2614,9 +2732,9 @@ function showEditItemModal(itemName, itemData) {
         }).join("");
         container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
         container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
-        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖。"); }); });
+        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖"); }); });
         container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
-        container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界。"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭。")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩。"); }); });
+        container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩"); }); });
     }
 
     function importWorld() {
@@ -2626,7 +2744,7 @@ function showEditItemModal(itemName, itemData) {
             reader.onload = function () {
                 try {
                     var data = JSON.parse(reader.result);
-                    if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据。"); return; }
+                    if (!data.nodes || !data.nodes.length) { toast("解析失败，非法的世界源数据"); return; }
                     var wid = data.id || generateId(); if (worlds[wid]) wid = generateId();
                     data.id = wid; if (!data.name) data.name = file.name.replace(/\.json$/, "");
                     if (!data.createdAt) data.createdAt = Date.now(); data.updatedAt = Date.now();
@@ -2746,8 +2864,10 @@ function showEditItemModal(itemName, itemData) {
             '<label class="tlg-label">路径摘要指令（{{context}} = 路径信息）</label><textarea class="tlg-textarea" id="tlg-path-summary-prompt" style="min-height:80px;font-size:11px;">' + escHtml(s.pathSummaryPrompt || "") + '</textarea></div>' +
             // ─── 摘要引擎 ───
             '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取 → 向量化）</div>' +
-            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中。与总结并行独立，互不替代。[E]字段供样本库，[L]字段供地理库。</div>' +
+            '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中，与总结并行独立，互不替代[E]字段供样本库，[L]字段供地理库</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">补全批次大小（每批覆盖 <input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:50px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合）</label></div>' +
+            '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;margin-bottom:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button>' +
             '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">摘要核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-digest-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-digest-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
@@ -2792,7 +2912,7 @@ function showEditItemModal(itemName, itemData) {
     }
 
     function openPanel() {
-        if (!isEnabled()) { toast("观测台已关闭，请解除权限限制。"); return; }
+        if (!isEnabled()) { toast("观测台已关闭，请解除权限限制"); return; }
         loadCurrentWorld(); migrateOldData();
         var existingPanel = document.getElementById("tlg-panel"); if (existingPanel) existingPanel.remove();
         ensurePanelBuilt(); var panel = document.getElementById("tlg-panel"); if (!panel) return;
@@ -2869,6 +2989,7 @@ function showEditItemModal(itemName, itemData) {
             globalApi.queryRefinePrompt = document.getElementById("tlg-query-refine-prompt").value;
             globalApi.digestAutoMode = document.getElementById("tlg-digest-auto-toggle").classList.contains("on");
             globalApi.factUnitsMaxCount = Math.max(50, parseInt(document.getElementById("tlg-fact-units-max").value) || 500);
+            globalApi.digestBatchSize = Math.max(1, parseInt(document.getElementById("tlg-digest-batch-size").value) || 1);
             // 向量API
             globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim();
             globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim();
@@ -2889,7 +3010,7 @@ function showEditItemModal(itemName, itemData) {
             globalApi.rerankModel = document.getElementById("tlg-rerank-model").value.trim() || document.getElementById("tlg-rerank-model-select").value;
             globalApi.rerankUseLLM = document.getElementById("tlg-rerank-use-llm").classList.contains("on");
             globalApi.rerankLLMPrompt = document.getElementById("tlg-rerank-llm-prompt").value;
-            saveGlobalApi(); toast("引擎设置已锚定。");
+            saveGlobalApi(); toast(⚙"引擎设置已锚定");
         });
 
         document.getElementById("tlg-fetch-models").addEventListener("click", function () { flashBtn(this); globalApi.apiUrl = document.getElementById("tlg-api-url").value.trim(); globalApi.apiKey = document.getElementById("tlg-api-key").value.trim(); saveGlobalApi(); fetchModelList(); });
@@ -2898,30 +3019,32 @@ function showEditItemModal(itemName, itemData) {
         document.getElementById("tlg-fetch-vec-models").addEventListener("click", function () { flashBtn(this); globalApi.vectorUrl = document.getElementById("tlg-vec-url").value.trim(); globalApi.vectorKey = document.getElementById("tlg-vec-key").value.trim(); saveGlobalApi(); fetchVectorModelList(); });
         document.getElementById("tlg-test-api").addEventListener("click", function () {
             var url = document.getElementById("tlg-api-url").value.trim(), key = document.getElementById("tlg-api-key").value.trim();
-            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送探针…");
-            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+            if (!url) { toast("地址为空无"); return; } flashBtn(this); toast("发送探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 节点联通" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
         });
         document.getElementById("tlg-test-vec-api").addEventListener("click", function () {
             var url = document.getElementById("tlg-vec-url").value.trim(), key = document.getElementById("tlg-vec-key").value.trim();
-            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送辅助探针…");
-            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 辅助节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+            if (!url) { toast("地址为空无"); return; } flashBtn(this); toast("发送辅助探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 辅助节点联通" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
         });
         document.getElementById("tlg-test-rerank-api").addEventListener("click", function () {
             var url = document.getElementById("tlg-rerank-url").value.trim(), key = document.getElementById("tlg-rerank-key").value.trim();
-            if (!url) { toast("地址为空。"); return; } flashBtn(this); toast("发送重排探针…");
-            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 重排节点联通。" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
+            if (!url) { toast("地址为空无"); return; } flashBtn(this); toast("发送重排探针…");
+            fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} }).then(function (res) { toast(res.ok ? "✓ 重排节点联通" : ("✗ 阻断: " + res.status)); }).catch(function (e) { toast("✗ " + e.message); });
         });
         document.getElementById("tlg-fetch-rerank-models").addEventListener("click", function () { flashBtn(this); globalApi.rerankUrl = document.getElementById("tlg-rerank-url").value.trim(); globalApi.rerankKey = document.getElementById("tlg-rerank-key").value.trim(); saveGlobalApi(); fetchRerankModelList(); });
         document.getElementById("tlg-rerank-model-select").addEventListener("change", function () { if (this.value) document.getElementById("tlg-rerank-model").value = this.value; });
                 document.getElementById("tlg-digest-auto-toggle").addEventListener("click", function () {
+                document.getElementById("tlg-digest-catchup-btn").addEventListener("click", function() { flashBtn(this); runCatchupDigest(); });
+                document.getElementById("tlg-digest-batch-size").addEventListener("change", function() { globalApi.digestBatchSize = Math.max(1, parseInt(this.value) || 1); saveGlobalApi(); });
             globalApi.digestAutoMode = !globalApi.digestAutoMode;
             this.classList.toggle("on", globalApi.digestAutoMode); saveGlobalApi();
         });
         document.getElementById("tlg-test-digest-api").addEventListener("click", function () {
             var url = document.getElementById("tlg-digest-url").value.trim(), key = document.getElementById("tlg-digest-key").value.trim();
-            if (!url) { toast("摘要地址为空。"); return; } flashBtn(this); toast("发送摘要探针…");
+            if (!url) { toast("摘要地址为空"); return; } flashBtn(this); toast("发送摘要探针…");
             fetch(buildEndpoint(url, "/models"), { headers: key ? { Authorization: "Bearer " + key } : {} })
-            .then(function (res) { toast(res.ok ? "✓ 摘要节点联通。" : ("✗ 阻断: " + res.status)); })
+            .then(function (res) { toast(res.ok ? "✓ 摘要节点联通" : ("✗ 阻断: " + res.status)); })
             .catch(function (e) { toast("✗ " + e.message); });
         });
         document.getElementById("tlg-fetch-digest-models").addEventListener("click", function () {
@@ -3018,21 +3141,21 @@ function showEditItemModal(itemName, itemData) {
         var host = document.querySelector("#extensions_settings2") || document.querySelector("#extensions_settings") || document.querySelector("#extensions_settings1");
         if (!host) return; var enabled = isEnabled();
         var block = document.createElement("div"); block.id = "tlg_settings_block"; block.className = "extension_container";
-        block.innerHTML = '<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>🌊 河岸凝视</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;"><span>授予观测权限</span><div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div><div style="font-size:12px;opacity:.75;margin-bottom:10px;">解除或封锁观测台访问。</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">展开高维观测界面</button><div style="font-size:11px;opacity:.55;margin-top:10px;">快捷锚定：/tlg_anchor | 视野滤镜：/tlg_filter</div></div></div>';
+        block.innerHTML = '<div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>🌊 河岸凝视</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;"><span>授予观测权限</span><div class="tlg-toggle ' + (enabled ? "on" : "") + '" id="tlg_enable_toggle"></div></div><div style="font-size:12px;opacity:.75;margin-bottom:10px;">解除或封锁观测台访问</div><button type="button" class="tlg-btn tlg-btn-primary" id="tlg_settings_open" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">展开高维观测界面</button><div style="font-size:11px;opacity:.55;margin-top:10px;">快捷锚定：/tlg_anchor | 视野滤镜：/tlg_filter</div></div></div>';
         host.appendChild(block);
         document.getElementById("tlg_enable_toggle").onclick = function () { var next = !this.classList.contains("on"); this.classList.toggle("on", next); setEnabled(next); toast(next ? "观测权限已授予" : "观测权限已封锁"); };
         document.getElementById("tlg_settings_open").onclick = function () { openPanel(); };
     }
 
     function registerSlashCommand() {
-        function wrap(value) { if (!isEnabled()) { toast("未授予观测权限。"); return ""; } loadCurrentWorld(); showAnchorModal(String(value || "")); return ""; }
+        function wrap(value) { if (!isEnabled()) { toast("未授予观测权限"); return ""; } loadCurrentWorld(); showAnchorModal(String(value || "")); return ""; }
         var st = getST();
         if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_anchor", function (a, v) { return wrap(v); }, [], "凝固当前因果刻度", true, true); }
         if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
-            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_anchor", callback: function (a, v) { return wrap(v); }, helpString: "建立新的因果锚点。" })); } catch (e) {}
+            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_anchor", callback: function (a, v) { return wrap(v); }, helpString: "建立新的因果锚点" })); } catch (e) {}
         }
         function toggleFilter() {
-            if (!isEnabled()) { toast("未授予观测权限。"); return ""; }
+            if (!isEnabled()) { toast("未授予观测权限"); return ""; }
             globalApi.summaryFilterMode = !globalApi.summaryFilterMode; saveGlobalApi(); updateInjectionWithVector();
             toast(globalApi.summaryFilterMode ? "视野滤镜：仅注视本时间线" : "视野滤镜：俯瞰全部因果纠缠"); return "";
         }
@@ -3123,7 +3246,7 @@ function showEditItemModal(itemName, itemData) {
                             }
                             state.lastAutoSummaryRange = null;
                             state.turnsSinceAnchor = 0; saveTurnsCounter();
-                            toast("🔄 检测到重试，已撤销最近自动切片。");
+                            toast("↻ 检测到重试，已撤销最近自动切片");
                         }
                     });
                 }
