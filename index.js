@@ -2556,7 +2556,7 @@ function showEditItemModal(itemName, itemData) {
             '<div class="tlg-tab" data-tab="archive">观测坐标</div>' +
             '<div class="tlg-tab" data-tab="summary">因果档案</div>' +
             '<div class="tlg-tab" data-tab="vault">观测档案库</div>' +
-            '<div class="tlg-tab" data-tab="worldarchive" style="padding:0 18px;height:100%;display:flex;align-items:center;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;white-space:nowrap;">世界档案</div>' +     
+            '<div class="tlg-tab" data-tab="worldarchive">世界档案</div>' +     
             '<div class="tlg-tab" data-tab="worlds">诸世界</div>' +
             '<div class="tlg-tab" data-tab="engine">引擎核心</div>' +
             '<div id="tlg-close">✕</div></div><div id="tlg-body">' +
@@ -2585,9 +2585,9 @@ function showEditItemModal(itemName, itemData) {
             '<div class="tlg-view" data-view="worldarchive"><div class="tlg-scroll-panel" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">' +
             // 子标签
             '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;">' +
-            '<div class="tlg-subtab active" data-subtab="geo" style="padding:8px 16px;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;">地理</div>' +
-            '<div class="tlg-subtab" data-subtab="npc" style="padding:8px 16px;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;">样本库</div>' +
-            '<div class="tlg-subtab" data-subtab="items" style="padding:8px 16px;cursor:pointer;font-size:12px;color:#6a6a78;border-bottom:2px solid transparent;">物品</div>' +
+            '<div class="tlg-subtab active" data-subtab="geo" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">地理</div>' +
+            '<div class="tlg-subtab" data-subtab="npc" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">样本库</div>' +
+            '<div class="tlg-subtab" data-subtab="items" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">物品</div>' +
             '</div>' +
             // 地理子面板
             '<div class="tlg-subpanel active" data-subpanel="geo" style="flex:1;overflow:hidden;position:relative;">' +
