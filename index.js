@@ -1749,51 +1749,86 @@ function renderGeoCanvas() {
 }
 
 // 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
+// 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
+// 修复：改用 position:absolute 挂到 canvas 父容器；用 requestAnimationFrame 延迟读尺寸
 function updateGeoInfoBox() {
+    var wrap = geoCanvas && geoCanvas.parentElement;
+    if (!wrap) return;
+    if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+
     var box = document.getElementById("tlg-geo-infobox");
 
-    if (!geoSelectedPath || !geoCanvas) { if (box) box.remove(); geoInfoBoxPath = null; return; }
+    if (!geoSelectedPath) {
+        if (box) box.style.display = "none";
+        geoInfoBoxPath = null;
+        return;
+    }
     var node = getGeoNodeByPath(geoSelectedPath);
-    if (!node) { if (box) box.remove(); geoInfoBoxPath = null; return; }
+    if (!node) {
+        if (box) box.style.display = "none";
+        geoInfoBoxPath = null;
+        return;
+    }
 
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
-        box.style.cssText = "position:fixed;z-index:2147483646;width:220px;max-width:60vw;pointer-events:auto;";
-        document.body.appendChild(box);
+        box.style.cssText = "position:absolute;z-index:10;width:200px;max-width:60vw;pointer-events:auto;display:none;font-size:12px;";
+        wrap.appendChild(box);
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
     if (geoInfoBoxPath !== geoSelectedPath) {
         box.innerHTML =
-            '<div class="tlg-archive-title">' + escHtml(node.name) + (node.isCurrent ? '（当前）' : '') + '</div>' +
-            '<div class="tlg-archive-meta">' + escHtml(geoSelectedPath) + (node.locked ? ' · 已锁定' : '') + '</div>' +
-            '<div class="tlg-archive-brief">' + (node.desc ? escHtml(node.desc) : '<span style="color:rgba(255,255,255,0.4);">暂无简介。</span>') + '</div>' +
+            '<div class="tlg-archive-title" style="font-size:13px;">' + escHtml(node.name) +
+            (node.isCurrent ? ' <span style="color:#7a7a8a;font-size:11px;">◎ 当前</span>' : '') + '</div>' +
+            '<div class="tlg-archive-meta" style="font-size:11px;">' + escHtml(geoSelectedPath) +
+            (node.locked ? ' · 🔒' : '') + '</div>' +
+            '<div class="tlg-archive-brief" style="font-size:12px;max-height:60px;overflow:hidden;">' +
+            (node.desc ? escHtml(node.desc) : '<span style="color:#7a7a8a;">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
-            tlgBtn("tlg-geo-infobox-edit", "编辑", "primary", "padding:4px 10px;font-size:11px;") +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-infobox-edit" ' +
+            'style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;font-size:11px;padding:4px 10px;">编辑</button>' +
             '</div>';
-        box.querySelector("#tlg-geo-infobox-edit").onclick = function() { showEditGeoModal(geoSelectedPath); };
+        var editBtn = box.querySelector("#tlg-geo-infobox-edit");
+        if (editBtn) editBtn.onclick = function(e) {
+            e.stopPropagation();
+            showEditGeoModal(geoSelectedPath);
+        };
         geoInfoBoxPath = geoSelectedPath;
     }
 
-    // fixed 定位：世界坐标转屏幕坐标
-    var canvasRect = geoCanvas.getBoundingClientRect();
-    var nodes = layoutGeoNodes();
-    var nd = null;
-    for (var i = 0; i < nodes.length; i++) { if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; } }
-    if (!nd) return;
-    var screenX = canvasRect.left + canvasRect.width / 2 + geoCamX + nd.x * geoCamZoom;
-    var screenY = canvasRect.top + canvasRect.height / 2 + geoCamY + nd.y * geoCamZoom;
-    var boxW = box.offsetWidth || 220, boxH = box.offsetHeight || 90;
-    // clamp 防超屏
-    var left = screenX + 24;
-    var top = screenY - boxH / 2;
-    if (left + boxW > window.innerWidth - 8) left = screenX - boxW - 24;
-    if (top < 8) top = 8;
-    if (top + boxH > window.innerHeight - 8) top = window.innerHeight - boxH - 8;
-    if (left < 8) left = 8;
-    box.style.left = left + "px";
-    box.style.top = top + "px";
+    box.style.display = "block";
+
+    requestAnimationFrame(function() {
+        if (!geoCanvas || !box || box.style.display === "none") return;
+        var nodes = layoutGeoNodes();
+        var nd = null;
+        for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; }
+        }
+        if (!nd) return;
+
+        var cw = geoCanvas.offsetWidth;
+        var ch = geoCanvas.offsetHeight;
+        var NODE_R = 16;
+        var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
+        var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
+
+        var boxW = box.offsetWidth || 200;
+        var boxH = box.offsetHeight || 100;
+        var gap = NODE_R * geoCamZoom + 8;
+
+        var left = px + gap;
+        if (left + boxW > cw - 4) left = px - gap - boxW;
+        left = Math.max(4, Math.min(left, cw - boxW - 4));
+
+        var top = py - boxH / 2;
+        top = Math.max(4, Math.min(top, ch - boxH - 4));
+
+        box.style.left = left + "px";
+        box.style.top = top + "px";
+    });
 }
 
 function geoHitTest(clientX, clientY) {
@@ -1902,14 +1937,14 @@ function showAddGeoModal() {
     var allPaths = getAllGeoPaths();
     var optsHtml = '<option value="">（最高层级）</option>' + allPaths.map(function(p) { return '<option value="' + escHtml(p) + '">' + escHtml(p) + '</option>'; }).join("");
     var bd = tlgModalBackdrop("tlg-geo-modal");
-    bd.innerHTML = '<div class="tlg-modal">' +
-        '<div class="tlg-modal-title">+ 添加地点</div>' +
-        tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-name" placeholder="地点名称" />') +
-        tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-desc"></textarea>') +
-        tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-parent">' + optsHtml + '</select>') +
-        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-cur" /> 主角当前位置</label>' +
-        tlgActionsRow(tlgBtn("tlg-geo-cancel", "取消") + tlgBtn("tlg-geo-ok", "确认", "primary")) +
-        '</div>';
+    bd.innerHTML = '<div class="tlg-modal" style="font-size:13px;max-width:380px;">' +
+    '<div class="tlg-modal-title">+ 添加地点</div>' +
+    tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-name" placeholder="地点名称" />') +
+    tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-desc" style="min-height:60px;max-height:100px;font-size:12px;"></textarea>') +
+    tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-parent">' + optsHtml + '</select>') +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-cur" /> 主角当前位置</label>' +
+    tlgActionsRow(tlgBtn("tlg-geo-cancel", "取消") + tlgBtn("tlg-geo-ok", "确认", "primary")) +
+    '</div>';
     document.body.appendChild(bd);
     bd.querySelector("#tlg-geo-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-ok").onclick = function() {
@@ -1961,11 +1996,11 @@ function showEditGeoModal(fullPath) {
     }).join("");
 
     var bd = tlgModalBackdrop("tlg-geo-modal");
-    bd.innerHTML = '<div class="tlg-modal">' +
+    bd.innerHTML = '<div class="tlg-modal" style="font-size:13px;max-width:380px;">' +
         '<div class="tlg-modal-title">编辑地点</div>' +
         tlgField("名称", '<input type="text" class="tlg-input" id="tlg-geo-edit-name" value="' + escHtml(curName) + '" />') +
         tlgField("上级地理", '<select class="tlg-select" id="tlg-geo-edit-parent">' + optsHtml + '</select>') +
-        tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-edit-desc">' + escHtml(node.desc || "") + '</textarea>') +
+        tlgField("简介", '<textarea class="tlg-textarea" id="tlg-geo-edit-desc" style="min-height:60px;max-height:100px;font-size:12px;">' + escHtml(node.desc || "") + '</textarea>') +
         '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;"><input type="checkbox" id="tlg-geo-edit-cur" ' + (node.isCurrent ? "checked" : "") + ' /> 主角当前位置</label>' +
         '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:12px;"><input type="checkbox" id="tlg-geo-edit-lock" ' + (node.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖简介）</label>' +
         tlgActionsRow(
