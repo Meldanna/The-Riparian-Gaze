@@ -1598,11 +1598,11 @@ function tlgModalBackdrop(id) {
     var old = document.getElementById(id); if (old) old.remove();
     var bd = document.createElement("div");
     bd.id = id;
-    bd.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:10vh;box-sizing:border-box;overflow-y:auto;";
+    bd.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
     bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
+    setTimeout(function() { var modal = bd.querySelector(".tlg-modal"); if (modal && modal.offsetHeight >= window.innerHeight - 32) { bd.style.alignItems = "flex-start"; bd.style.paddingTop = "16px"; } }, 30);
     return bd;
 }
-
 // ══════════════════════════════════════
 // 通用：面板右上角搜索控件（地理树 / NPC / 物品 三个子页共用）
 // ══════════════════════════════════════
@@ -1750,22 +1750,17 @@ function renderGeoCanvas() {
 
 // 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
 function updateGeoInfoBox() {
-    var wrap = geoCanvas ? geoCanvas.parentElement : null;
-    if (!wrap) return;
     var box = document.getElementById("tlg-geo-infobox");
 
-    if (!geoSelectedPath) { if (box) box.remove(); geoInfoBoxPath = null; return; }
+    if (!geoSelectedPath || !geoCanvas) { if (box) box.remove(); geoInfoBoxPath = null; return; }
     var node = getGeoNodeByPath(geoSelectedPath);
     if (!node) { if (box) box.remove(); geoInfoBoxPath = null; return; }
-
-    // 定位基准：确保wrap是relative，绝对定位的子元素才会以wrap为参照（做法与ensureSearchUI一致）
-    if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
 
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
-        box.style.cssText = "position:absolute;z-index:4;width:220px;max-width:60vw;pointer-events:auto;left:-9999px;top:-9999px;";
-        wrap.appendChild(box);
+        box.style.cssText = "position:fixed;z-index:2147483646;width:220px;max-width:60vw;pointer-events:auto;";
+        document.body.appendChild(box);
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
@@ -1780,6 +1775,26 @@ function updateGeoInfoBox() {
         box.querySelector("#tlg-geo-infobox-edit").onclick = function() { showEditGeoModal(geoSelectedPath); };
         geoInfoBoxPath = geoSelectedPath;
     }
+
+    // fixed 定位：世界坐标转屏幕坐标
+    var canvasRect = geoCanvas.getBoundingClientRect();
+    var nodes = layoutGeoNodes();
+    var nd = null;
+    for (var i = 0; i < nodes.length; i++) { if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; } }
+    if (!nd) return;
+    var screenX = canvasRect.left + canvasRect.width / 2 + geoCamX + nd.x * geoCamZoom;
+    var screenY = canvasRect.top + canvasRect.height / 2 + geoCamY + nd.y * geoCamZoom;
+    var boxW = box.offsetWidth || 220, boxH = box.offsetHeight || 90;
+    // clamp 防超屏
+    var left = screenX + 24;
+    var top = screenY - boxH / 2;
+    if (left + boxW > window.innerWidth - 8) left = screenX - boxW - 24;
+    if (top < 8) top = 8;
+    if (top + boxH > window.innerHeight - 8) top = window.innerHeight - boxH - 8;
+    if (left < 8) left = 8;
+    box.style.left = left + "px";
+    box.style.top = top + "px";
+}
 
     // 跟随节点在画布中的当前屏幕位置，并保持在容器可视范围内
     // 关键：node.x/node.y是画布自身坐标系里的偏移，但infobox是挂在wrap下用绝对定位的，
@@ -2045,18 +2060,38 @@ function getNpcArchive() {
 }
 
 function getMvuNpcData() {
-    // 从 MVU stat_data 实时提取NPC信息（生命力/法力/穿着等）
     try {
         var snap = window.__tlg_mvu_snapshot || {};
-        if (snap.npcs && typeof snap.npcs === "object") return snap.npcs;
-        if (snap.characters && typeof snap.characters === "object") return snap.characters;
-        var result = {};
-        var keys = Object.keys(snap);
-        for (var i = 0; i < keys.length; i++) {
-            var v = snap[keys[i]];
-            if (v && typeof v === "object" && (v.hp !== undefined || v.life !== undefined || v.mp !== undefined || v.clothing !== undefined)) {
-                result[keys[i]] = v;
+        var npcLib = snap["NPC库"] || {};
+        var fixedKeys = ["当前处境", "NPC库", "命运分支池", "Observer"];
+        var userKey = null;
+        var allKeys = Object.keys(snap);
+        for (var i = 0; i < allKeys.length; i++) {
+            if (fixedKeys.indexOf(allKeys[i]) === -1 && snap[allKeys[i]] && typeof snap[allKeys[i]] === "object" && snap[allKeys[i]]["生理"]) {
+                userKey = allKeys[i]; break;
             }
+        }
+        var userBonds = (userKey && snap[userKey]["羁绊关系"]) ? snap[userKey]["羁绊关系"] : {};
+        var result = {};
+        // 主角
+        if (userKey && snap[userKey]) {
+            var u = snap[userKey], ue = {};
+            if (u["生理"]) { ue.hp = u["生理"]["健康值"] || 0; ue.hpMax = u["生理"]["上限"] || 100; }
+            if (u["魔法"] && u["魔法"]["上限"] > 0) { ue.mp = u["魔法"]["当前法力"] || 0; ue.mpMax = u["魔法"]["上限"] || 100; }
+            if (Object.keys(ue).length) result[userKey] = ue;
+        }
+        // NPC
+        var npcNames = Object.keys(npcLib);
+        for (var j = 0; j < npcNames.length; j++) {
+            var name = npcNames[j], npc = npcLib[name];
+            if (!npc || typeof npc !== "object") continue;
+            var ne = {};
+            if (npc["生理"]) { ne.hp = npc["生理"]["健康值"] || 0; ne.hpMax = npc["生理"]["上限"] || 100; }
+            if (npc["魔法"] && npc["魔法"]["上限"] > 0) { ne.mp = npc["魔法"]["当前法力"] || 0; ne.mpMax = npc["魔法"]["上限"] || 100; }
+            var bond = userBonds[name] || {};
+            if (bond["好感度"] !== undefined) ne["好感度"] = bond["好感度"];
+            if (bond["暧昧值"] && bond["暧昧值"] > 0) ne["暧昧值"] = bond["暧昧值"];
+            if (Object.keys(ne).length) result[name] = ne;
         }
         return Object.keys(result).length ? result : null;
     } catch (e) { return null; }
@@ -2117,16 +2152,25 @@ function refreshNpcList() {
         var dotSize = TIER_DOT[tier] + "px";
         var dotGlow = TIER_GLOW[tier];
         var timelineCount = (npc.timeline || []).length;
-        var mvuStr = "";
+        var mvuBars = "";
         if (mvuData && mvuData[name]) {
             var md = mvuData[name];
-            var parts = [];
-            if (md.hp !== undefined || md.life !== undefined) parts.push("生命力:" + (md.hp !== undefined ? md.hp : md.life));
-            if (md.mp !== undefined || md.mana !== undefined) parts.push("法力:" + (md.mp !== undefined ? md.mp : md.mana));
-            if (md.clothing !== undefined) parts.push("穿着:" + md.clothing);
-            if (md.items !== undefined) parts.push("物品:" + (Array.isArray(md.items) ? md.items.join(",") : md.items));
-            if (md.affection !== undefined || md.favor !== undefined) parts.push("好感:" + (md.affection !== undefined ? md.affection : md.favor));
-            mvuStr = parts.join(" · ");
+            if (md.hp !== undefined) {
+                var hpPct = Math.round(md.hp / (md.hpMax || 100) * 100);
+                mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">生命 ' + md.hp + '/' + md.hpMax + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(80,180,160,0.5),rgba(150,230,210,0.8));height:100%;width:' + hpPct + '%;"></div></div></div>';
+            }
+            if (md.mp !== undefined) {
+                var mpPct = Math.round(md.mp / (md.mpMax || 100) * 100);
+                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">法力 ' + md.mp + '/' + md.mpMax + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(80,120,200,0.5),rgba(140,180,250,0.8));height:100%;width:' + mpPct + '%;"></div></div></div>';
+            }
+            if (md["好感度"] !== undefined) {
+                var bondPct = Math.min(100, Math.max(0, md["好感度"]));
+                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">好感 ' + md["好感度"] + '/100</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(180,150,100,0.4),rgba(230,210,160,0.7));height:100%;width:' + bondPct + '%;"></div></div></div>';
+            }
+            if (md["暧昧值"]) {
+                var ambPct = Math.min(100, Math.max(0, md["暧昧值"]));
+                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">暧昧 ' + md["暧昧值"] + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(200,120,160,0.4),rgba(250,180,210,0.7));height:100%;width:' + ambPct + '%;"></div></div></div>';
+            }
         }
         return '<div class="tlg-archive-card">' +
             '<div style="display:flex;align-items:center;gap:8px;">' +
@@ -2140,7 +2184,7 @@ function refreshNpcList() {
             '</div>' +
             '<div class="tlg-archive-meta">' + escHtml(npc.role || "未知身份") + '</div>' +
             (npc.appearance && npc.appearance.value ? '<div class="tlg-archive-meta">外貌：' + escHtml(npc.appearance.value.slice(0, 50)) + (npc.appearance.value.length > 50 ? "…" : "") + '</div>' : '') +
-            (mvuStr ? '<div class="tlg-archive-meta">MVU：' + escHtml(mvuStr) + '</div>' : '') +
+            mvuBars +
             '<div class="tlg-archive-meta">' + timelineCount + ' 条经历</div>' +
             '<button type="button" class="tlg-btn tlg-npc-detail" data-name="' + escHtml(name) + '" style="width:100%;margin-top:8px;">详情编辑</button>' +
             '</div>';
@@ -2631,12 +2675,12 @@ function showEditItemModal(itemName, itemData) {
             '</div>' +
             // NPC子面板
             '<div class="tlg-subpanel" data-subpanel="npc" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-            '<div style="font-size:13px;font-weight:600;color:#e8e8f0;">样本库</div>' +
-            '<div style="display:flex;gap:6px;">' +
-            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:4px 8px;font-size:11px;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
-            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">+ 新建</button>' +
-            '</div></div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-right:60px;">' +
+            '<div style="font-size:13px;font-weight:600;color:#ffffff;">样本库</div>' +
+            '<div style="flex:1;"></div>' +
+            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:4px 8px;font-size:11px;flex:none;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
+            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:4px 10px;flex:none;">+ 新建</button>' +
+            '</div>' +
             '<div id="tlg-npc-list"></div>' +
             '</div>' +
             // 物品子面板
