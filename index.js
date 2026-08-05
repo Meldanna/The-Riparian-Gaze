@@ -2972,7 +2972,9 @@ function showEditItemModal(itemName, itemData) {
         if (!isEnabled()) { toast("观测台已关闭，请解除权限限制"); return; }
         loadCurrentWorld(); migrateOldData();
         var existingPanel = document.getElementById("tlg-panel"); if (existingPanel) existingPanel.remove();
-        ensurePanelBuilt(); var panel = document.getElementById("tlg-panel"); if (!panel) return;
+        try { ensurePanelBuilt(); } catch(e) { console.error("[河岸凝视] 面板构建失败:", e); toast("⚠ 面板构建失败: " + e.message); return; }
+        var panel = document.getElementById("tlg-panel"); if (!panel) return;
+
         panel.style.display = "flex"; document.body.style.overflow = "hidden";
         (function animLoop() {
             var p = document.getElementById("tlg-panel"); if (!p || p.style.display !== "flex") return;
