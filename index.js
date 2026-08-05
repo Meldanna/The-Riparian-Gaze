@@ -1598,9 +1598,8 @@ function tlgModalBackdrop(id) {
     var old = document.getElementById(id); if (old) old.remove();
     var bd = document.createElement("div");
     bd.id = id;
-    bd.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+    bd.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100dvh;background:rgba(0,0,0,0.85);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:12vh;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;";
     bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
-    setTimeout(function() { var modal = bd.querySelector(".tlg-modal"); if (modal && modal.offsetHeight >= window.innerHeight - 32) { bd.style.alignItems = "flex-start"; bd.style.paddingTop = "16px"; } }, 30);
     return bd;
 }
 // ══════════════════════════════════════
@@ -1797,6 +1796,39 @@ function updateGeoInfoBox() {
         };
         geoInfoBoxPath = geoSelectedPath;
     }
+
+    box.style.display = "block";
+
+    requestAnimationFrame(function() {
+        if (!geoCanvas || !box || box.style.display === "none") return;
+        var nodes = layoutGeoNodes();
+        var nd = null;
+        for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; }
+        }
+        if (!nd) return;
+
+        var cw = geoCanvas.offsetWidth;
+        var ch = geoCanvas.offsetHeight;
+        var NODE_R = 16;
+        var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
+        var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
+
+        var boxW = box.offsetWidth || 200;
+        var boxH = box.offsetHeight || 100;
+        var gap = NODE_R * geoCamZoom + 8;
+
+        var left = px + gap;
+        if (left + boxW > cw - 4) left = px - gap - boxW;
+        left = Math.max(4, Math.min(left, cw - boxW - 4));
+
+        var top = py - boxH / 2;
+        top = Math.max(4, Math.min(top, ch - boxH - 4));
+
+        box.style.left = left + "px";
+        box.style.top = top + "px";
+    });
+}
 
     box.style.display = "block";
 
