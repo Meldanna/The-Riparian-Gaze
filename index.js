@@ -1830,39 +1830,6 @@ function updateGeoInfoBox() {
     });
 }
 
-    box.style.display = "block";
-
-    requestAnimationFrame(function() {
-        if (!geoCanvas || !box || box.style.display === "none") return;
-        var nodes = layoutGeoNodes();
-        var nd = null;
-        for (var i = 0; i < nodes.length; i++) {
-            if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; }
-        }
-        if (!nd) return;
-
-        var cw = geoCanvas.offsetWidth;
-        var ch = geoCanvas.offsetHeight;
-        var NODE_R = 16;
-        var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
-        var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
-
-        var boxW = box.offsetWidth || 200;
-        var boxH = box.offsetHeight || 100;
-        var gap = NODE_R * geoCamZoom + 8;
-
-        var left = px + gap;
-        if (left + boxW > cw - 4) left = px - gap - boxW;
-        left = Math.max(4, Math.min(left, cw - boxW - 4));
-
-        var top = py - boxH / 2;
-        top = Math.max(4, Math.min(top, ch - boxH - 4));
-
-        box.style.left = left + "px";
-        box.style.top = top + "px";
-    });
-}
-
 function geoHitTest(clientX, clientY) {
     if (!geoCanvas) return null;
     var rect = geoCanvas.getBoundingClientRect();
@@ -2352,7 +2319,7 @@ function renderNpcTimelineList(container, npc) {
 
 function showAddNpcModal() {
     var bd = tlgModalBackdrop("tlg-npc-add-modal");
-    bd.innerHTML = '<div class="tlg-modal" style="max-width:480px;">' +
+    bd.innerHTML = '<div class="tlg-modal">' +
         '<div class="tlg-modal-title">添加样本</div>' +
         tlgField("角色名称", '<input type="text" class="tlg-input" id="tlg-npc-add-name" placeholder="角色名称" />') +
         tlgField("身份/职业", '<input type="text" class="tlg-input" id="tlg-npc-add-role" />') +
