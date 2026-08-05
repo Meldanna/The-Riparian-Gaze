@@ -1872,6 +1872,21 @@ function initGeoCanvas() {
         if (!geoDragMoved) {
             var hit = geoHitTest(x, y);
             geoSelectedPath = (hit && geoSelectedPath === hit) ? null : hit;
+            // 选中节点后，如果节点像素位置超出 canvas 可视区域，自动平移使其居中
+            if (geoSelectedPath) {
+                var nodes = layoutGeoNodes(), nd = null;
+                for (var i = 0; i < nodes.length; i++) { if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; } }
+                if (nd) {
+                    var cw = c.offsetWidth, ch = c.offsetHeight;
+                    var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
+                    var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
+                    var margin = 60;
+                    if (px < margin || px > cw - margin || py < margin || py > ch - margin) {
+                        geoCamX = -nd.x * geoCamZoom;
+                        geoCamY = -nd.y * geoCamZoom;
+                    }
+                }
+            }
             renderGeoCanvas();
         }
     }
@@ -1882,10 +1897,22 @@ function initGeoCanvas() {
     c.onmouseleave = function() { geoIsPanning = false; c.style.cursor = "grab"; };
     c.onwheel = function(e) { e.preventDefault(); geoCamZoom = Math.max(0.2, Math.min(5, geoCamZoom * (e.deltaY < 0 ? 1.1 : 0.9))); renderGeoCanvas(); };
 
-    // 触屏支持（移动端拖动）
-    c.ontouchstart = function(e) { if (e.touches.length !== 1) return; var t = e.touches[0]; handleDown(t.clientX, t.clientY); };
-    c.ontouchmove = function(e) { if (e.touches.length !== 1) return; e.preventDefault(); var t = e.touches[0]; handleMove(t.clientX, t.clientY); };
-    c.ontouchend = function(e) { var t = e.changedTouches[0]; handleUp(t.clientX, t.clientY); };
+        // 触屏支持（单指拖动 + 双指缩放，与因果树一致）
+    var geoLastTouchDist = 0;
+    c.ontouchstart = function(e) {
+        if (e.touches.length === 1) { var t = e.touches[0]; handleDown(t.clientX, t.clientY); }
+        else if (e.touches.length === 2) { geoIsPanning = false; geoLastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
+    };
+    c.ontouchmove = function(e) {
+        if (e.touches.length === 1 && geoIsPanning) { e.preventDefault(); var t = e.touches[0]; handleMove(t.clientX, t.clientY); }
+        else if (e.touches.length === 2) {
+            e.preventDefault();
+            var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            if (geoLastTouchDist > 0) { geoCamZoom = Math.max(0.2, Math.min(5, geoCamZoom * (dist / geoLastTouchDist))); renderGeoCanvas(); }
+            geoLastTouchDist = dist;
+        }
+    };
+    c.ontouchend = function(e) { var t = e.changedTouches[0]; handleUp(t.clientX, t.clientY); geoLastTouchDist = 0; };
 
     renderGeoCanvas();
 }
@@ -2046,11 +2073,11 @@ function showEditGeoModal(fullPath) {
             saveWorlds();
             geoInfoBoxPath = null; // 内容变化，强制信息框刷新
         }
-        bd.remove(); renderGeoCanvas(); toast("已保存。");
+        bd.remove(); renderGeoCanvas(); toast("地点已铭刻");
     };
     bd.querySelector("#tlg-geo-edit-del").onclick = function() {
         if (!confirm("删除「" + fullPath + "」及其所有子级？")) return;
-        deleteGeoNode(fullPath); bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("已删除。");
+        deleteGeoNode(fullPath); bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已抹除");
     };
 }
 
@@ -2334,7 +2361,7 @@ function showAddNpcModal() {
         var name = bd.querySelector("#tlg-npc-add-name").value.trim();
         if (!name) { toast("名称为空。"); return; }
         var archive = getNpcArchive();
-        if (archive[name]) { toast("该角色已存在。"); return; }
+        if (archive[name]) { toast("该样本已存在"); return; }
         archive[name] = {
             role: bd.querySelector("#tlg-npc-add-role").value.trim(),
             appearance: { value: bd.querySelector("#tlg-npc-add-app").value.trim(), locked: false },
@@ -2343,7 +2370,7 @@ function showAddNpcModal() {
             tier: bd.querySelector("#tlg-npc-add-tier").value,
             custom: []
         };
-        saveWorlds(); bd.remove(); refreshNpcList(); toast("已添加：" + name);
+        saveWorlds(); bd.remove(); refreshNpcList(); toast("样本已添加：" + name);
     };
 }
 
@@ -2467,20 +2494,12 @@ function refreshItemsList() {
 function showEditItemModal(itemName, itemData) {
     var w = currentWorldId && worlds[currentWorldId] ? worlds[currentWorldId] : null;
     var override = (w && w.itemOverrides && w.itemOverrides[itemName]) || {};
-
-    var historyHtml = (itemData.history || []).slice().reverse().slice(0, 20).map(function(h) {
-        return '<div style="border-left:2px solid rgba(255,255,255,0.25);padding-left:8px;margin-bottom:6px;">' +
-            '<div style="font-size:9px;color:rgba(255,255,255,0.45);">#' + (h.turnIdx || "?") + '</div>' +
-            '<div style="font-size:11px;color:rgba(255,255,255,0.85);">' + escHtml(h.change) + ' → ' + escHtml(h.owner) + ' / ' + escHtml(h.state) + '</div></div>';
-    }).join("") || '<div style="color:rgba(255,255,255,0.45);font-size:11px;">无变动记录。</div>';
-
-    var bd = tlgModalBackdrop("tlg-item-modal");
-    bd.innerHTML = '<div class="tlg-modal">' +
-        '<div class="tlg-modal-title">' + escHtml(itemName) + '</div>' +
-        tlgField("物品介绍", '<textarea class="tlg-textarea" id="tlg-item-desc">' + escHtml(override.desc !== undefined ? override.desc : (itemData.desc || "")) + '</textarea>') +
-        tlgField("当前状态", '<input type="text" class="tlg-input" id="tlg-item-state" value="' + escHtml(override.state !== undefined ? override.state : (itemData.state || "")) + '" />') +
-        tlgField("所有者（物主）", '<input type="text" class="tlg-input" id="tlg-item-owner" value="' + escHtml(override.owner !== undefined ? override.owner : (itemData.owner || "")) + '" placeholder="物品本来归属的人" />') +
-        tlgField("当前持有者", '<input type="text" class="tlg-input" id="tlg-item-holder" value="' + escHtml(override.holder !== undefined ? override.holder : (itemData.holder || itemData.owner || "")) + '" placeholder="与所有者不同即为借用，例如被借走时填借用人" />') +
+        tlgField("所有者（物主）",
+            '<input type="text" class="tlg-input" id="tlg-item-owner" list="tlg-item-owner-list" value="' + escHtml(override.owner !== undefined ? override.owner : (itemData.owner || "")) + '" placeholder="选择或输入角色名" />' +
+            '<datalist id="tlg-item-owner-list">' + Object.keys(getNpcArchive()).map(function(n) { return '<option value="' + escHtml(n) + '">'; }).join("") + '</datalist>') +
+        tlgField("当前持有者",
+            '<input type="text" class="tlg-input" id="tlg-item-holder" list="tlg-item-holder-list" value="' + escHtml(override.holder !== undefined ? override.holder : (itemData.holder || itemData.owner || "")) + '" placeholder="选择或输入角色名（与物主不同即为借用）" />' +
+            '<datalist id="tlg-item-holder-list">' + Object.keys(getNpcArchive()).map(function(n) { return '<option value="' + escHtml(n) + '">'; }).join("") + '</datalist>') +
         '<div class="tlg-section-title" style="margin:12px 0 6px;">变动历史（最近20条）</div>' +
         '<div style="max-height:150px;overflow-y:auto;margin-bottom:10px;">' + historyHtml + '</div>' +
         tlgActionsRow(
