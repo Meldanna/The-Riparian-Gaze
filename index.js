@@ -1614,7 +1614,7 @@ function ensureSearchUI(scopeEl, cfg) {
     btn.type = "button"; btn.id = cfg.btnId; btn.className = "tlg-btn";
     btn.title = "搜索";
     btn.style.cssText = "position:absolute;top:8px;right:8px;z-index:5;padding:4px 8px;font-size:12px;";
-    btn.textContent = "🔍";
+    btn.textContent = "搜索";
     scopeEl.appendChild(btn);
 
     var panel = document.createElement("div");
@@ -1742,7 +1742,7 @@ function renderGeoCanvas() {
         geoCtx.font = nd.isCurrent ? "bold 10px sans-serif" : "10px sans-serif";
         geoCtx.textAlign = "left"; geoCtx.textBaseline = "middle";
         geoCtx.fillText(nd.name.length > 8 ? nd.name.slice(0, 7) + "…" : nd.name, nd.x + NODE_R + 6, nd.y);
-        if (nd.isCurrent) { geoCtx.font = "10px sans-serif"; geoCtx.fillText("📍", nd.x - NODE_R - 16, nd.y); }
+        if (nd.isCurrent) { geoCtx.font = "9px sans-serif"; geoCtx.textAlign = "right"; geoCtx.fillText("当前", nd.x - NODE_R - 6, nd.y); }
     }
     geoCtx.restore();
     updateGeoInfoBox();
@@ -1758,18 +1758,21 @@ function updateGeoInfoBox() {
     var node = getGeoNodeByPath(geoSelectedPath);
     if (!node) { if (box) box.remove(); geoInfoBoxPath = null; return; }
 
+    // 定位基准：确保wrap是relative，绝对定位的子元素才会以wrap为参照（做法与ensureSearchUI一致）
+    if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
-        box.style.cssText = "position:absolute;z-index:4;width:220px;max-width:60vw;pointer-events:auto;";
+        box.style.cssText = "position:absolute;z-index:4;width:220px;max-width:60vw;pointer-events:auto;left:-9999px;top:-9999px;";
         wrap.appendChild(box);
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
     if (geoInfoBoxPath !== geoSelectedPath) {
         box.innerHTML =
-            '<div class="tlg-archive-title">' + escHtml(node.name) + (node.isCurrent ? ' 📍' : '') + '</div>' +
-            '<div class="tlg-archive-meta">' + escHtml(geoSelectedPath) + (node.locked ? ' · 🔒 已锁定' : '') + '</div>' +
+            '<div class="tlg-archive-title">' + escHtml(node.name) + (node.isCurrent ? '（当前）' : '') + '</div>' +
+            '<div class="tlg-archive-meta">' + escHtml(geoSelectedPath) + (node.locked ? ' · 已锁定' : '') + '</div>' +
             '<div class="tlg-archive-brief">' + (node.desc ? escHtml(node.desc) : '<span style="color:rgba(255,255,255,0.4);">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
             tlgBtn("tlg-geo-infobox-edit", "编辑", "primary", "padding:4px 10px;font-size:11px;") +
@@ -1779,12 +1782,18 @@ function updateGeoInfoBox() {
     }
 
     // 跟随节点在画布中的当前屏幕位置，并保持在容器可视范围内
-    var rect = geoCanvas.getBoundingClientRect();
-    var screenX = rect.width / 2 + geoCamX + node.x * geoCamZoom;
-    var screenY = rect.height / 2 + geoCamY + node.y * geoCamZoom;
+    // 关键：node.x/node.y是画布自身坐标系里的偏移，但infobox是挂在wrap下用绝对定位的，
+    // 所以必须先算出画布相对wrap的偏移量，再叠加上去——否则一旦wrap里画布上方/左侧还有别的元素
+    // （标题、按钮等），infobox就会按错误的原点定位，表现为"点击后位置不对/看不到"。
+    var canvasRect = geoCanvas.getBoundingClientRect();
+    var wrapRect = wrap.getBoundingClientRect();
+    var offsetX = canvasRect.left - wrapRect.left;
+    var offsetY = canvasRect.top - wrapRect.top;
+    var screenX = offsetX + canvasRect.width / 2 + geoCamX + node.x * geoCamZoom;
+    var screenY = offsetY + canvasRect.height / 2 + geoCamY + node.y * geoCamZoom;
     var boxW = box.offsetWidth || 220, boxH = box.offsetHeight || 90;
-    var left = Math.max(8, Math.min(screenX + 24, rect.width - boxW - 8));
-    var top = Math.max(8, Math.min(screenY - boxH / 2, rect.height - boxH - 8));
+    var left = Math.max(8, Math.min(screenX + 24, wrapRect.width - boxW - 8));
+    var top = Math.max(8, Math.min(screenY - boxH / 2, wrapRect.height - boxH - 8));
     box.style.left = left + "px";
     box.style.top = top + "px";
 }
@@ -1879,12 +1888,16 @@ function jumpToGeoNode(fullPath) {
     var nodes = layoutGeoNodes(), target = null;
     for (var i = 0; i < nodes.length; i++) if (nodes[i].fullPath === fullPath) { target = nodes[i]; break; }
     if (!target || !geoCanvas) return;
+    // 先关闭搜索面板，再measure画布尺寸：面板收起会让容器的可用宽度变化，
+    // 如果在它关闭之前就renderGeoCanvas()，画布的内部像素尺寸会按"面板还开着"时的CSS尺寸来设置，
+    // 等面板真正收起、CSS尺寸变了之后，浏览器会把这份像素数据非等比拉伸去填充新尺寸，圆就变成了椭圆。
+    var panel = document.getElementById("tlg-geo-search-panel");
+    if (panel) panel.style.display = "none";
     geoCamX = -target.x * geoCamZoom;
     geoCamY = -target.y * geoCamZoom;
     geoSelectedPath = fullPath;
-    renderGeoCanvas();
-    var panel = document.getElementById("tlg-geo-search-panel");
-    if (panel) panel.style.display = "none";
+    // 等浏览器完成这一轮布局回流后再渲染，避免拿到过渡态的尺寸
+    requestAnimationFrame(function() { renderGeoCanvas(); });
 }
 
 function showAddGeoModal() {
@@ -2123,7 +2136,7 @@ function refreshNpcList() {
             '<option value="important"' + (tier === "important" ? " selected" : "") + '>重要</option>' +
             '<option value="normal"' + (tier === "normal" ? " selected" : "") + '>普通</option></select>' +
             '<div class="tlg-archive-title" style="flex:1;">' + escHtml(name) + '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="width:22px;height:22px;min-height:0;padding:0;flex:0 0 22px;">✕</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="width:auto;height:22px;min-height:0;padding:0 8px;flex:0 0 auto;font-size:11px;">删除</button>' +
             '</div>' +
             '<div class="tlg-archive-meta">' + escHtml(npc.role || "未知身份") + '</div>' +
             (npc.appearance && npc.appearance.value ? '<div class="tlg-archive-meta">外貌：' + escHtml(npc.appearance.value.slice(0, 50)) + (npc.appearance.value.length > 50 ? "…" : "") + '</div>' : '') +
@@ -2167,7 +2180,7 @@ function showNpcDetailModal(name) {
     bd.innerHTML = '<div class="tlg-modal" style="max-width:540px;max-height:82vh;overflow-y:auto;">' +
         '<div class="tlg-modal-title">' + escHtml(name) + '</div>' +
         tlgField("身份/职业", '<input type="text" class="tlg-input" id="tlg-npc-role" value="' + escHtml(npc.role || "") + '" />') +
-        tlgField("外貌（手动）" + (npc.appearance && npc.appearance.locked ? " 🔒" : ""),
+        tlgField("外貌（手动）" + (npc.appearance && npc.appearance.locked ? "（已锁定）" : ""),
             '<textarea class="tlg-textarea" id="tlg-npc-app">' + escHtml((npc.appearance && npc.appearance.value) || "") + '</textarea>' +
             '<label style="display:flex;align-items:center;gap:4px;font-size:10px;margin:-6px 0 12px;color:rgba(255,255,255,0.7);"><input type="checkbox" id="tlg-npc-app-lock" ' + (npc.appearance && npc.appearance.locked ? "checked" : "") + ' /> 锁定（AI不可覆盖）</label>') +
         mvuHtml +
@@ -2210,12 +2223,11 @@ function renderNpcTimelineList(container, npc) {
     if (!list.length) { container.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-style:italic;font-size:11px">暂无经历。</div>'; return; }
     container.innerHTML = list.map(function(t, idx) {
         return '<div class="tlg-npc-evt-row" draggable="true" data-idx="' + idx + '" style="border-left:2px solid rgba(255,255,255,0.3);padding:6px 8px;margin-bottom:6px;background:rgba(255,255,255,0.04);border-radius:4px;cursor:grab;display:flex;gap:8px;align-items:flex-start;">' +
-            '<span style="color:rgba(255,255,255,0.4);font-size:11px;line-height:1.5;">⠿</span>' +
             '<div style="flex:1;min-width:0;">' +
             '<div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(t.timestamp || "?") + (t.auto ? ' · 自动' : ' · 手动') + '</div>' +
             '<div style="font-size:11px;">' + escHtml(t.event) + '</div>' +
             '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 5px;font-size:11px;flex-shrink:0;">✕</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 8px;font-size:11px;flex-shrink:0;">删除</button>' +
             '</div>';
     }).join("");
 
@@ -2245,13 +2257,33 @@ function renderNpcTimelineList(container, npc) {
 }
 
 function showAddNpcModal() {
-    var name = prompt("角色名称：");
-    if (!name || !name.trim()) return;
-    name = name.trim();
-    var archive = getNpcArchive();
-    if (archive[name]) { toast("该角色已存在。"); return; }
-    archive[name] = { role: "", appearance: { value: "", locked: false }, age: { value: "", locked: false }, timeline: [], tier: "normal", custom: [] };
-    saveWorlds(); refreshNpcList(); toast("已添加：" + name);
+    var bd = tlgModalBackdrop("tlg-npc-add-modal");
+    bd.innerHTML = '<div class="tlg-modal" style="max-width:480px;">' +
+        '<div class="tlg-modal-title">添加样本</div>' +
+        tlgField("角色名称", '<input type="text" class="tlg-input" id="tlg-npc-add-name" placeholder="角色名称" />') +
+        tlgField("身份/职业", '<input type="text" class="tlg-input" id="tlg-npc-add-role" />') +
+        tlgField("外貌（手动）", '<textarea class="tlg-textarea" id="tlg-npc-add-app"></textarea>') +
+        tlgField("分类", '<select class="tlg-select" id="tlg-npc-add-tier">' +
+            '<option value="core">核心</option><option value="important">重要</option><option value="normal" selected>普通</option></select>') +
+        tlgActionsRow(tlgBtn("tlg-npc-add-cancel", "取消") + tlgBtn("tlg-npc-add-ok", "确认", "primary")) +
+        '</div>';
+    document.body.appendChild(bd);
+    bd.querySelector("#tlg-npc-add-cancel").onclick = function() { bd.remove(); };
+    bd.querySelector("#tlg-npc-add-ok").onclick = function() {
+        var name = bd.querySelector("#tlg-npc-add-name").value.trim();
+        if (!name) { toast("名称为空。"); return; }
+        var archive = getNpcArchive();
+        if (archive[name]) { toast("该角色已存在。"); return; }
+        archive[name] = {
+            role: bd.querySelector("#tlg-npc-add-role").value.trim(),
+            appearance: { value: bd.querySelector("#tlg-npc-add-app").value.trim(), locked: false },
+            age: { value: "", locked: false },
+            timeline: [],
+            tier: bd.querySelector("#tlg-npc-add-tier").value,
+            custom: []
+        };
+        saveWorlds(); bd.remove(); refreshNpcList(); toast("已添加：" + name);
+    };
 }
 
 // ══════════════════════════════════════
