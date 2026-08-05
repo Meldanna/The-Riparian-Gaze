@@ -2292,6 +2292,29 @@
             globalApi.rerankUseLLM = !globalApi.rerankUseLLM;
             this.classList.toggle("on", globalApi.rerankUseLLM); saveGlobalApi();
         });
+        // 世界档案子标签切换
+        panel.querySelectorAll(".tlg-subtab").forEach(function(tab) {
+            tab.onclick = function() {
+                panel.querySelectorAll(".tlg-subtab").forEach(function(t) { t.classList.remove("active"); t.style.color = "#6a6a78"; t.style.borderBottomColor = "transparent"; });
+                panel.querySelectorAll(".tlg-subpanel").forEach(function(p) { p.style.display = "none"; p.classList.remove("active"); });
+                tab.classList.add("active"); tab.style.color = "#e8e8f0"; tab.style.borderBottomColor = "#c0c0c8";
+                var target = panel.querySelector('.tlg-subpanel[data-subpanel="' + tab.dataset.subtab + '"]');
+                if (target) { target.style.display = ""; target.classList.add("active"); }
+                if (tab.dataset.subtab === "geo") { setTimeout(function(){ initGeoCanvas(); renderGeoCanvas(); }, 50); }
+                else if (tab.dataset.subtab === "npc") { refreshNpcList(); }
+                else if (tab.dataset.subtab === "items") { refreshItemsList(); }
+            };
+        });
+        // 地理按钮
+        var geoAddBtn = document.getElementById("tlg-geo-add");
+        if (geoAddBtn) geoAddBtn.onclick = function() { showAddGeoModal(); };
+        var geoResetBtn = document.getElementById("tlg-geo-reset");
+        if (geoResetBtn) geoResetBtn.onclick = function() { geoCamX = 0; geoCamY = 0; geoCamZoom = 1; renderGeoCanvas(); };
+        // NPC按钮
+        var npcAddBtn = document.getElementById("tlg-npc-add");
+        if (npcAddBtn) npcAddBtn.onclick = function() { showAddNpcModal(); };
+        var npcFilter = document.getElementById("tlg-npc-filter");
+        if (npcFilter) npcFilter.onchange = function() { refreshNpcList(); };
         initCanvasEvents();
     }
 
