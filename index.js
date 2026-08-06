@@ -3021,9 +3021,9 @@ function showEditItemModal(itemName, itemData) {
             '<div class="tlg-view" data-view="worldarchive"><div class="tlg-scroll-panel" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">' +
             // 子标签
             '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;">' +
-            '<div class="tlg-subtab active" data-subtab="geo" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">地理</div>' +
-            '<div class="tlg-subtab" data-subtab="npc" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">样本库</div>' +
-            '<div class="tlg-subtab" data-subtab="items" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">物品</div>' +
+            '<div class="tlg-subtab active" data-subtab="geo">地理</div>' +
+            '<div class="tlg-subtab" data-subtab="npc">样本库</div>' +
+            '<div class="tlg-subtab" data-subtab="items">物品</div>' +
             '</div>' +
             // 地理子面板
             '<div class="tlg-subpanel active" data-subpanel="geo" style="flex:1;overflow:hidden;position:relative;">' +
@@ -3040,12 +3040,15 @@ function showEditItemModal(itemName, itemData) {
             '<button type="button" class="tlg-btn" id="tlg-npc-add">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-npc-list"></div>' +
+            '</div>' +
             // 物品子面板
             '<div class="tlg-subpanel" data-subpanel="items" style="flex:1;overflow-y:auto;padding:14px;display:none;position:relative;">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
             '<button type="button" class="tlg-btn" id="tlg-item-add">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-items-list"></div>' +
+            '</div>' +
+            '</div></div>' +
             // 诸世界
             '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">' +
