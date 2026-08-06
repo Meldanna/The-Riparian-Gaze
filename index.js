@@ -1926,6 +1926,7 @@ function updateGeoInfoBox() {
     var wrap = geoCanvas && geoCanvas.parentElement;
     if (!wrap) return;
     if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+    wrap.style.overflow = "visible";  // ← 加这一行
 
     var box = document.getElementById("tlg-geo-infobox");
 
@@ -2457,8 +2458,6 @@ function showNpcDetailModal(name) {
     document.body.appendChild(bd);
 
     renderNpcTimelineList(document.getElementById("tlg-npc-timeline-list"), npc);
-// 显示时间线条目时
-var timeLabel = item.timestamp || ("第" + (item.turnIdx || "?") + "轮");
 
     bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-save").onclick = function() {
@@ -2668,6 +2667,18 @@ function refreshItemsList() {
 function showEditItemModal(itemName, itemData) {
     var w = currentWorldId && worlds[currentWorldId] ? worlds[currentWorldId] : null;
     var override = (w && w.itemOverrides && w.itemOverrides[itemName]) || {};
+    var historyHtml = (itemData.history || []).slice(-20).map(function(h) {
+        return '<div style="font-size:11px;border-left:2px solid rgba(255,255,255,0.2);padding:3px 8px;margin-bottom:4px;">' +
+            '<span style="color:rgba(255,255,255,0.5);">' + escHtml(h.time || "?") + '</span> ' +
+            escHtml(h.change || "") + (h.state ? ' → ' + escHtml(h.state) : '') +
+            '</div>';
+    }).join("") || '<div style="color:rgba(255,255,255,0.4);font-size:11px;">暂无变动记录。</div>';
+
+    var bd = tlgModalBackdrop("tlg-item-modal");
+    bd.innerHTML = '<div class="tlg-modal">' +
+        '<div class="tlg-modal-title">' + escHtml(itemName) + '</div>' +
+        tlgField("描述", '<textarea class="tlg-textarea" id="tlg-item-desc">' + escHtml(override.desc !== undefined ? override.desc : (itemData.desc || "")) + '</textarea>') +
+        tlgField("当前状态", '<input type="text" class="tlg-input" id="tlg-item-state" value="' + escHtml(override.state !== undefined ? override.state : (itemData.state || "")) + '" />') +
         tlgField("所有者（物主）",
             '<input type="text" class="tlg-input" id="tlg-item-owner" list="tlg-item-owner-list" value="' + escHtml(override.owner !== undefined ? override.owner : (itemData.owner || "")) + '" placeholder="选择或输入角色名" />' +
             '<datalist id="tlg-item-owner-list">' + Object.keys(getNpcArchive()).map(function(n) { return '<option value="' + escHtml(n) + '">'; }).join("") + '</datalist>') +
