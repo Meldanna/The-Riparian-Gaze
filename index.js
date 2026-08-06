@@ -2441,29 +2441,46 @@ function refreshNpcList() {
         var mvuBars = "";
         if (mvuData && mvuData[name]) {
             var md = mvuData[name];
+            var BAR_COLORS = {
+                "hp": "#c04040,#e06060", "生命": "#c04040,#e06060", "健康值": "#c04040,#e06060",
+                "mp": "#4060c0,#6090e0", "法力": "#4060c0,#6090e0", "当前法力": "#4060c0,#6090e0",
+                "因果权重": "#a09040,#d0c060", "因果": "#a09040,#d0c060",
+                "好感度": "#c08030,#e0a050", "好感": "#c08030,#e0a050",
+                "暧昧值": "#c06080,#e080a0", "暧昧": "#c06080,#e080a0"
+            };
+            function getBarColor(key) {
+                var lower = key.toLowerCase();
+                var keys = Object.keys(BAR_COLORS);
+                for (var bi = 0; bi < keys.length; bi++) { if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; }
+                return "#606060,#909090";
+            }
             var mvuKeys = Object.keys(md);
             for (var mk = 0; mk < mvuKeys.length; mk++) {
                 var k = mvuKeys[mk];
                 var val = md[k];
-                // 有对应 Max 值的数值：渲染进度条
                 var maxKey = k + "Max";
                 if (typeof val === "number" && md[maxKey] !== undefined) {
                     var max = md[maxKey] || 100;
                     var pct = Math.min(100, Math.max(0, Math.round(val / max * 100)));
-                    var barColor = pct > 50 ? "rgba(100,200,180,0.6),rgba(150,230,210,0.8)" : pct > 25 ? "rgba(200,180,80,0.5),rgba(230,210,120,0.7)" : "rgba(200,80,80,0.5),rgba(230,120,120,0.7)";
-                    mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + ' ' + val + '/' + max + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,' + barColor + ');height:100%;width:' + pct + '%;"></div></div></div>';
+                    var colors = getBarColor(k);
+                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.6);">' + escHtml(k) + '</div>' +
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;margin:2px 0 4px;">' +
+                        '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,' + colors + ');transition:width 0.4s;"></div>' +
+                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '/' + max + '</div>' +
+                        '</div></div>';
                     continue;
                 }
-                // 跳过 Max 键本身
                 if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) continue;
-                // 普通数值（无 Max）：显示数值 + 简易条（假设满值100）
                 if (typeof val === "number") {
                     var pct2 = Math.min(100, Math.max(0, val));
-                    mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + ' ' + val + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(160,140,120,0.4),rgba(200,180,160,0.6));height:100%;width:' + pct2 + '%;"></div></div></div>';
+                    var colors2 = getBarColor(k);
+                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.6);">' + escHtml(k) + '</div>' +
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;margin:2px 0 4px;">' +
+                        '<div style="height:100%;width:' + pct2 + '%;background:linear-gradient(90deg,' + colors2 + ');transition:width 0.4s;"></div>' +
+                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '</div>' +
+                        '</div></div>';
                     continue;
                 }
-                // 非数值：文本显示
-                mvuBars += '<div style="margin-top:2px;font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + '：' + escHtml(String(Array.isArray(val) ? val.join(", ") : val)) + '</div>';
             }
         }
 
@@ -2508,24 +2525,47 @@ function showNpcDetailModal(name) {
     var mvuData = getMvuNpcData();
     var mvuHtml = "";
     if (mvuData && mvuData[name]) {
-                var md = mvuData[name];
+        var md = mvuData[name];
+        var BAR_COLORS = {
+            "hp": "#c04040,#e06060", "生命": "#c04040,#e06060", "健康值": "#c04040,#e06060",
+            "mp": "#4060c0,#6090e0", "法力": "#4060c0,#6090e0", "当前法力": "#4060c0,#6090e0",
+            "因果权重": "#a09040,#d0c060", "因果": "#a09040,#d0c060",
+            "好感度": "#c08030,#e0a050", "好感": "#c08030,#e0a050",
+            "暧昧值": "#c06080,#e080a0", "暧昧": "#c06080,#e080a0"
+        };
+        function getBarColor(key) {
+            var lower = key.toLowerCase();
+            var keys = Object.keys(BAR_COLORS);
+            for (var bi = 0; bi < keys.length; bi++) { if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; }
+            return "#606060,#909090";
+        }
         var rows = Object.keys(md).map(function(k) {
             var val = md[k];
-            // 检测是否为数值型且有对应的 Max 值（如 hp/hpMax, mp/mpMax）
             var maxKey = k + "Max";
             if (typeof val === "number" && md[maxKey] !== undefined) {
                 var max = md[maxKey] || 100;
-                var pct = Math.min(100, Math.max(0, (val / max) * 100));
-                var color = pct > 50 ? "rgba(100,220,180,0.7)" : pct > 25 ? "rgba(220,180,80,0.7)" : "rgba(220,80,80,0.7)";
+                var pct = Math.min(100, Math.max(0, Math.round(val / max * 100)));
+                var colors = getBarColor(k);
                 return '<div style="padding:4px 0;">' +
-                    '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span style="color:rgba(255,255,255,0.6)">' + escHtml(k) + '</span><span>' + val + ' / ' + max + '</span></div>' +
-                    '<div style="height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:3px;transition:width 0.3s;"></div></div>' +
-                    '</div>';
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:2px;">' + escHtml(k) + '</div>' +
+                    '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;">' +
+                    '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,' + colors + ');transition:width 0.4s;"></div>' +
+                    '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '/' + max + '</div>' +
+                    '</div></div>';
             }
-            // 跳过 Max 后缀的键（已在上面渲染过了）
             if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) return "";
-            // 普通键值对
-            return '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.1);"><span style="color:rgba(255,255,255,0.6)">' + escHtml(k) + '</span><span>' + escHtml(String(Array.isArray(val) ? val.join(", ") : val)) + '</span></div>';
+            if (typeof val === "number") {
+                var pct2 = Math.min(100, Math.max(0, val));
+                var colors2 = getBarColor(k);
+                return '<div style="padding:4px 0;">' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:2px;">' + escHtml(k) + '</div>' +
+                    '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;">' +
+                    '<div style="height:100%;width:' + pct2 + '%;background:linear-gradient(90deg,' + colors2 + ');transition:width 0.4s;"></div>' +
+                    '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '</div>' +
+                    '</div></div>';
+            }
+            if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) return "";
+            return '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.06);"><span style="color:rgba(255,255,255,0.6);font-size:11px;">' + escHtml(k) + '</span><span style="font-size:11px;">' + escHtml(String(Array.isArray(val) ? val.join(", ") : val)) + '</span></div>';
         }).filter(Boolean).join("");
         mvuHtml = '<div class="tlg-section" style="margin-bottom:12px;"><div class="tlg-section-title" style="font-size:11px;">MVU 实时数据</div>' + rows + '</div>';
     } else {
@@ -2892,7 +2932,7 @@ function showEditItemModal(itemName, itemData) {
             createdAt: Date.now(), updatedAt: Date.now()
         };
         currentWorldId = wid; setLinkedWorldId(wid);
-        state.nodes = worlds[wid].nodes; state.summaries = []; state.currentNodeId = rootId; state.selectedNodeId = null;
+        state.nodes = worlds[wid].nodes; state.summaries = []; state.memories = []; state.currentNodeId = rootId; state.selectedNodeId = null;
         saveWorlds(); toast("✦ 新世界已创建: " + name); refreshWorlds(); renderCanvas(); refreshArchive();
     }
     function fetchVectorModelList() {
