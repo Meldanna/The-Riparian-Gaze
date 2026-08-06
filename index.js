@@ -2054,37 +2054,36 @@ function updateGeoInfoBox() {
         geoInfoBoxPath = geoSelectedPath;
     }
 
+    // 先算位置，再显示（避免移动端一帧闪烁到底部）
+    var nodes = layoutGeoNodes();
+    var nd = null;
+    for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; }
+    }
+    if (!nd) { box.style.display = "none"; return; }
+
+    var cw = geoCanvas.offsetWidth;
+    var ch = geoCanvas.offsetHeight;
+    if (!cw || !ch) { box.style.display = "none"; return; }
+
+    var NODE_R = 16;
+    var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
+    var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
+
+    // 先用预估高度定位（避免依赖 offsetHeight）
+    var boxW = 200, boxH = 120;
+    var gap = NODE_R * geoCamZoom + 8;
+
+    var left = px + gap;
+    if (left + boxW > cw - 4) left = px - gap - boxW;
+    left = Math.max(4, Math.min(left, cw - boxW - 4));
+
+    var top = py - boxH / 2;
+    top = Math.max(4, Math.min(top, ch - boxH - 4));
+
+    box.style.left = left + "px";
+    box.style.top = top + "px";
     box.style.display = "block";
-
-    requestAnimationFrame(function() {
-        if (!geoCanvas || !box || box.style.display === "none") return;
-        var nodes = layoutGeoNodes();
-        var nd = null;
-        for (var i = 0; i < nodes.length; i++) {
-            if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; }
-        }
-        if (!nd) return;
-
-        var cw = geoCanvas.offsetWidth;
-        var ch = geoCanvas.offsetHeight;
-        var NODE_R = 16;
-        var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
-        var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
-
-        var boxW = box.offsetWidth || 200;
-        var boxH = box.offsetHeight || 100;
-        var gap = NODE_R * geoCamZoom + 8;
-
-        var left = px + gap;
-        if (left + boxW > cw - 4) left = px - gap - boxW;
-        left = Math.max(4, Math.min(left, cw - boxW - 4));
-
-        var top = py - boxH / 2;
-        top = Math.max(4, Math.min(top, ch - boxH - 4));
-
-        box.style.left = left + "px";
-        box.style.top = top + "px";
-    });
 }
 
 function geoHitTest(clientX, clientY) {
