@@ -2014,6 +2014,7 @@ function updateGeoInfoBox() {
         geoInfoBoxPath = null;
         return;
     }
+
     var node = getGeoNodeByPath(geoSelectedPath);
     if (!node) {
         if (box) box.style.display = "none";
@@ -2021,6 +2022,7 @@ function updateGeoInfoBox() {
         return;
     }
 
+    // 小窗挂在 body 上，用 fixed 定位，不受 canvas 容器 overflow 限制
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
@@ -2029,6 +2031,7 @@ function updateGeoInfoBox() {
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
+    // 内容只在选中节点变化时重新生成
     if (geoInfoBoxPath !== geoSelectedPath) {
         box.innerHTML =
             '<div class="tlg-archive-title" style="font-size:13px;">' + escHtml(node.name) +
@@ -2049,10 +2052,9 @@ function updateGeoInfoBox() {
         geoInfoBoxPath = geoSelectedPath;
     }
 
-    // 用 getBoundingClientRect 将节点逻辑坐标转为视口坐标
+    // 计算节点在视口中的位置
     var rect = geoCanvas.getBoundingClientRect();
-    var cw = rect.width, ch = rect.height;
-    if (!cw || !ch) { box.style.display = "none"; return; }
+    if (!rect.width || !rect.height) { box.style.display = "none"; return; }
 
     var nodes = layoutGeoNodes();
     var nd = null;
@@ -2061,26 +2063,23 @@ function updateGeoInfoBox() {
     }
     if (!nd) { box.style.display = "none"; return; }
 
-    var NODE_R = 16;
-    // 节点在 canvas 内部的像素位置
-    var pxInCanvas = cw / 2 + geoCamX + nd.x * geoCamZoom;
-    var pyInCanvas = ch / 2 + geoCamY + nd.y * geoCamZoom;
-    // 转为视口坐标
+    // 节点在 canvas 内的像素位置 → 转为视口坐标
+    var pxInCanvas = rect.width / 2 + geoCamX + nd.x * geoCamZoom;
+    var pyInCanvas = rect.height / 2 + geoCamY + nd.y * geoCamZoom;
     var vpX = rect.left + pxInCanvas;
     var vpY = rect.top + pyInCanvas;
 
-    var boxW = 220, boxH = 160;
-    var gap = NODE_R * geoCamZoom + 8;
+    var boxW = 220, boxH = 140;
+    var gap = 16 * geoCamZoom + 8;
     var vw = window.innerWidth, vh = window.innerHeight;
 
     // 横向：优先右侧，放不下就左侧
     var left = vpX + gap;
     if (left + boxW > vw - 8) left = vpX - gap - boxW;
-    // 不做强制 clamp——允许被屏幕边缘裁切一点点，但保证至少露出 60px
     left = Math.max(8, Math.min(left, vw - 60));
 
-    // 纵向：居中于节点，不做强制限制
-    var top = vpY - boxH / 2;
+    // 纵向：节点居中偏上
+    var top = vpY - boxH / 3;
     top = Math.max(8, Math.min(top, vh - 60));
 
     box.style.left = left + "px";
