@@ -3132,7 +3132,9 @@ function showEditItemModal(itemName, itemData) {
             renderCanvas(); requestAnimationFrame(animLoop);
         })();
     }
-    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; }
+    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; 
+                            var geoBox = document.getElementById("tlg-geo-infobox"); if (geoBox) geoBox.remove();
+    }
 
     function switchTab(name) {
         var panel = document.getElementById("tlg-panel"); if (!panel) return;
@@ -3276,6 +3278,7 @@ function showEditItemModal(itemName, itemData) {
             tab.onclick = function() {
                 panel.querySelectorAll(".tlg-subtab").forEach(function(t) { t.classList.remove("active"); t.style.color = "#6a6a78"; t.style.borderBottomColor = "transparent"; });
                 panel.querySelectorAll(".tlg-subpanel").forEach(function(p) { p.style.display = "none"; p.classList.remove("active"); });
+                if (document.getElementById("tlg-geo-infobox")) document.getElementById("tlg-geo-infobox").style.display = "none";
                 tab.classList.add("active"); tab.style.color = "#e8e8f0"; tab.style.borderBottomColor = "#c0c0c8";
                 var target = panel.querySelector('.tlg-subpanel[data-subpanel="' + tab.dataset.subtab + '"]');
                 if (target) { target.style.display = ""; target.classList.add("active"); }
