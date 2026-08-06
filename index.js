@@ -2132,11 +2132,7 @@ function initGeoCanvas() {
             renderGeoCanvas();
         }
     }
-            }
-            renderGeoCanvas();
-        }
-    }
-
+        
     c.onmousedown = function(e) { if (e.button !== 0) return; handleDown(e.clientX, e.clientY); };
     c.onmousemove = function(e) { handleMove(e.clientX, e.clientY); };
     c.onmouseup = function(e) { handleUp(e.clientX, e.clientY); };
@@ -3024,10 +3020,10 @@ function showEditItemModal(itemName, itemData) {
             // ═══ 世界档案 ═══
             '<div class="tlg-view" data-view="worldarchive"><div class="tlg-scroll-panel" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">' +
             // 子标签
-            '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;padding:0 14px;">' +
-            '<div class="tlg-subtab active" data-subtab="geo" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">地理</div>' +
-            '<div class="tlg-subtab" data-subtab="npc" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">样本库</div>' +
-            '<div class="tlg-subtab" data-subtab="items" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">物品</div>' +
+            '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;">' +
+            '<div class="tlg-subtab active" data-subtab="geo" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">地理</div>' +
+            '<div class="tlg-subtab" data-subtab="npc" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">样本库</div>' +
+            '<div class="tlg-subtab" data-subtab="items" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">物品</div>' +
             '</div>' +
             // 地理子面板
             '<div class="tlg-subpanel active" data-subpanel="geo" style="flex:1;overflow:hidden;position:relative;">' +
@@ -3038,21 +3034,18 @@ function showEditItemModal(itemName, itemData) {
             '</div>' +
             '</div>' +
             // NPC子面板
-            '<div class="tlg-subpanel" data-subpanel="npc" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
+            '<div class="tlg-subpanel" data-subpanel="npc" style="flex:1;overflow-y:auto;padding:14px;display:none;position:relative;">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
-            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:5px 8px;font-size:11px;height:28px;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
-            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:5px 10px;height:28px;">+ 新建</button>' +
+            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;flex:none;margin-bottom:0;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
+            '<button type="button" class="tlg-btn" id="tlg-npc-add">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-npc-list"></div>' +
-            '</div>' +
             // 物品子面板
-            '<div class="tlg-subpanel" data-subpanel="items" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
+            '<div class="tlg-subpanel" data-subpanel="items" style="flex:1;overflow-y:auto;padding:14px;display:none;position:relative;">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
-            '<button type="button" class="tlg-btn" id="tlg-item-add" style="font-size:11px;padding:5px 10px;height:28px;">+ 新建</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-item-add">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-items-list"></div>' +
-            '</div>' +
-            '</div></div>' +
             // 诸世界
             '<div class="tlg-view" data-view="worlds"><div class="tlg-scroll-panel">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">' +
