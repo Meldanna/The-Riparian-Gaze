@@ -2439,20 +2439,28 @@ function refreshNpcList() {
         var dotGlow = TIER_GLOW[tier];
         var timelineCount = (npc.timeline || []).length;
         var mvuBars = "";
-        if (mvuData && mvuData[name]) {
+                if (mvuData && mvuData[name]) {
             var md = mvuData[name];
             var BAR_COLORS = {
-                "hp": "#c04040,#e06060", "生命": "#c04040,#e06060", "健康值": "#c04040,#e06060",
-                "mp": "#4060c0,#6090e0", "法力": "#4060c0,#6090e0", "当前法力": "#4060c0,#6090e0",
-                "因果权重": "#a09040,#d0c060", "因果": "#a09040,#d0c060",
-                "好感度": "#c08030,#e0a050", "好感": "#c08030,#e0a050",
-                "暧昧值": "#c06080,#e080a0", "暧昧": "#c06080,#e080a0"
+                "生命": "rgba(80,180,160,0.5),rgba(150,230,210,0.8)",
+                "健康值": "rgba(80,180,160,0.5),rgba(150,230,210,0.8)",
+                "法力": "rgba(80,120,200,0.5),rgba(140,180,250,0.8)",
+                "当前法力": "rgba(80,120,200,0.5),rgba(140,180,250,0.8)",
+                "因果权重": "rgba(200,200,240,0.45),rgba(245,245,255,0.85)",
+                "因果": "rgba(200,200,240,0.45),rgba(245,245,255,0.85)",
+                "好感度": "rgba(190,170,80,0.4),rgba(240,225,130,0.75)",
+                "好感": "rgba(190,170,80,0.4),rgba(240,225,130,0.75)",
+                "暧昧值": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)",
+                "暧昧": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)"
             };
+
             function getBarColor(key) {
                 var lower = key.toLowerCase();
                 var keys = Object.keys(BAR_COLORS);
-                for (var bi = 0; bi < keys.length; bi++) { if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; }
-                return "#606060,#909090";
+                for (var bi = 0; bi < keys.length; bi++) { 
+                    if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; 
+                }
+                return "rgba(100,100,100,0.4),rgba(160,160,160,0.7)";
             }
             var mvuKeys = Object.keys(md);
             for (var mk = 0; mk < mvuKeys.length; mk++) {
@@ -2463,23 +2471,19 @@ function refreshNpcList() {
                     var max = md[maxKey] || 100;
                     var pct = Math.min(100, Math.max(0, Math.round(val / max * 100)));
                     var colors = getBarColor(k);
-                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.6);">' + escHtml(k) + '</div>' +
-                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;margin:2px 0 4px;">' +
+                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-bottom:2px;">' + escHtml(k) + '</div>' +
+                        '<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:3px;height:14px;position:relative;overflow:hidden;">' +
                         '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,' + colors + ');transition:width 0.4s;"></div>' +
-                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '/' + max + '</div>' +
+                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:9px;color:#fff;line-height:14px;font-weight:bold;text-shadow:0 0 2px #000;">' + val + '/' + max + '</div>' +
                         '</div></div>';
-                    continue;
-                }
-                if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) continue;
-                if (typeof val === "number") {
+                } else if (typeof val === "number" && !k.endsWith("Max")) {
                     var pct2 = Math.min(100, Math.max(0, val));
                     var colors2 = getBarColor(k);
-                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.6);">' + escHtml(k) + '</div>' +
-                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:3px;height:14px;position:relative;overflow:hidden;margin:2px 0 4px;">' +
+                    mvuBars += '<div style="margin-top:4px;"><div style="font-size:10px;color:rgba(255,255,255,0.7);margin-bottom:2px;">' + escHtml(k) + '</div>' +
+                        '<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:3px;height:14px;position:relative;overflow:hidden;">' +
                         '<div style="height:100%;width:' + pct2 + '%;background:linear-gradient(90deg,' + colors2 + ');transition:width 0.4s;"></div>' +
-                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:10px;color:rgba(255,255,255,0.85);line-height:14px;pointer-events:none;">' + val + '</div>' +
+                        '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:9px;color:#fff;line-height:14px;font-weight:bold;text-shadow:0 0 2px #000;">' + val + '</div>' +
                         '</div></div>';
-                    continue;
                 }
             }
         }
@@ -2527,17 +2531,23 @@ function showNpcDetailModal(name) {
     if (mvuData && mvuData[name]) {
         var md = mvuData[name];
         var BAR_COLORS = {
-            "hp": "#c04040,#e06060", "生命": "#c04040,#e06060", "健康值": "#c04040,#e06060",
-            "mp": "#4060c0,#6090e0", "法力": "#4060c0,#6090e0", "当前法力": "#4060c0,#6090e0",
-            "因果权重": "#a09040,#d0c060", "因果": "#a09040,#d0c060",
-            "好感度": "#c08030,#e0a050", "好感": "#c08030,#e0a050",
-            "暧昧值": "#c06080,#e080a0", "暧昧": "#c06080,#e080a0"
+            "生命": "rgba(80,180,160,0.5),rgba(150,230,210,0.8)",
+            "健康值": "rgba(80,180,160,0.5),rgba(150,230,210,0.8)",
+            "法力": "rgba(80,120,200,0.5),rgba(140,180,250,0.8)",
+            "当前法力": "rgba(80,120,200,0.5),rgba(140,180,250,0.8)",
+            "因果权重": "rgba(200,200,240,0.45),rgba(245,245,255,0.85)",
+            "因果": "rgba(200,200,240,0.45),rgba(245,245,255,0.85)",
+            "好感度": "rgba(190,170,80,0.4),rgba(240,225,130,0.75)",
+            "好感": "rgba(190,170,80,0.4),rgba(240,225,130,0.75)",
+            "暧昧值": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)",
+            "暧昧": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)"
         };
+        
         function getBarColor(key) {
             var lower = key.toLowerCase();
             var keys = Object.keys(BAR_COLORS);
             for (var bi = 0; bi < keys.length; bi++) { if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; }
-            return "#606060,#909090";
+            return "rgba(100,100,100,0.4),rgba(160,160,160,0.7)";
         }
         var rows = Object.keys(md).map(function(k) {
             var val = md[k];
