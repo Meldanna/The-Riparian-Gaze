@@ -203,3 +203,27 @@
 *::-webkit-scrollbar-track { background:transparent; }
 *::-webkit-scrollbar-thumb { background:#3a3a4a;border-radius:2px; }
 *::-webkit-scrollbar-thumb:hover { background:#6a6a78; }
+/* ══════════════════════════════════════
+   世界档案子标签（地理/样本库/物品）
+   ══════════════════════════════════════ */
+.tlg-subtab {
+  padding: 0 14px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: rgba(255,255,255,0.55);
+  border-bottom: 2px solid transparent;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: color .2s;
+  font-family: serif;
+  letter-spacing: 2px;
+}
+.tlg-subtab.active {
+  color: #ffffff;
+  border-bottom-color: #ffffff;
+  text-shadow: 0 0 8px rgba(255,255,255,0.5);
+}
+.tlg-subtab:hover { color: rgba(255,255,255,0.8); }
