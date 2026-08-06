@@ -2005,16 +2005,11 @@ function renderGeoCanvas() {
 }
 
 // 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
-// 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
 // 修复：改用 position:absolute 挂到 canvas 父容器；用 requestAnimationFrame 延迟读尺寸
 function updateGeoInfoBox() {
-    var wrap = geoCanvas && geoCanvas.parentElement;
-    if (!wrap) return;
-    if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
-
     var box = document.getElementById("tlg-geo-infobox");
 
-    if (!geoSelectedPath) {
+    if (!geoSelectedPath || !geoCanvas) {
         if (box) box.style.display = "none";
         geoInfoBoxPath = null;
         return;
@@ -2029,8 +2024,8 @@ function updateGeoInfoBox() {
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
-        box.style.cssText = "position:absolute;z-index:10;width:200px;max-width:60vw;pointer-events:auto;display:none;font-size:12px;";
-        wrap.appendChild(box);
+        box.style.cssText = "position:fixed;z-index:2147483640;width:220px;max-width:70vw;pointer-events:auto;display:none;font-size:12px;";
+        document.body.appendChild(box);
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
@@ -2040,7 +2035,7 @@ function updateGeoInfoBox() {
             (node.isCurrent ? ' <span style="color:#7a7a8a;font-size:11px;">◎ 当前</span>' : '') + '</div>' +
             '<div class="tlg-archive-meta" style="font-size:11px;">' + escHtml(geoSelectedPath) +
             (node.locked ? ' · ⊚' : '') + '</div>' +
-            '<div class="tlg-archive-brief" style="font-size:12px;max-height:60px;overflow:hidden;">' +
+            '<div class="tlg-archive-brief" style="font-size:12px;max-height:120px;overflow-y:auto;-webkit-overflow-scrolling:touch;">' +
             (node.desc ? escHtml(node.desc) : '<span style="color:#7a7a8a;">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-infobox-edit" ' +
@@ -2054,7 +2049,11 @@ function updateGeoInfoBox() {
         geoInfoBoxPath = geoSelectedPath;
     }
 
-    // 先算位置，再显示（避免移动端一帧闪烁到底部）
+    // 用 getBoundingClientRect 将节点逻辑坐标转为视口坐标
+    var rect = geoCanvas.getBoundingClientRect();
+    var cw = rect.width, ch = rect.height;
+    if (!cw || !ch) { box.style.display = "none"; return; }
+
     var nodes = layoutGeoNodes();
     var nd = null;
     for (var i = 0; i < nodes.length; i++) {
@@ -2062,24 +2061,27 @@ function updateGeoInfoBox() {
     }
     if (!nd) { box.style.display = "none"; return; }
 
-    var cw = geoCanvas.offsetWidth;
-    var ch = geoCanvas.offsetHeight;
-    if (!cw || !ch) { box.style.display = "none"; return; }
-
     var NODE_R = 16;
-    var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
-    var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
+    // 节点在 canvas 内部的像素位置
+    var pxInCanvas = cw / 2 + geoCamX + nd.x * geoCamZoom;
+    var pyInCanvas = ch / 2 + geoCamY + nd.y * geoCamZoom;
+    // 转为视口坐标
+    var vpX = rect.left + pxInCanvas;
+    var vpY = rect.top + pyInCanvas;
 
-    // 先用预估高度定位（避免依赖 offsetHeight）
-    var boxW = 200, boxH = 120;
+    var boxW = 220, boxH = 160;
     var gap = NODE_R * geoCamZoom + 8;
+    var vw = window.innerWidth, vh = window.innerHeight;
 
-    var left = px + gap;
-    if (left + boxW > cw - 4) left = px - gap - boxW;
-    left = Math.max(4, Math.min(left, cw - boxW - 4));
+    // 横向：优先右侧，放不下就左侧
+    var left = vpX + gap;
+    if (left + boxW > vw - 8) left = vpX - gap - boxW;
+    // 不做强制 clamp——允许被屏幕边缘裁切一点点，但保证至少露出 60px
+    left = Math.max(8, Math.min(left, vw - 60));
 
-    var top = py - boxH / 2;
-    top = Math.max(4, Math.min(top, ch - boxH - 4));
+    // 纵向：居中于节点，不做强制限制
+    var top = vpY - boxH / 2;
+    top = Math.max(8, Math.min(top, vh - 60));
 
     box.style.left = left + "px";
     box.style.top = top + "px";
