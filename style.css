@@ -230,3 +230,6 @@
 /* 地理小窗隐藏滚动条但保留滑动 */
 #tlg-geo-infobox .tlg-archive-brief::-webkit-scrollbar { display: none; }
 #tlg-geo-infobox .tlg-archive-brief { scrollbar-width: none; -ms-overflow-style: none; }
+/* 标签栏隐藏横向滚动条但保留可滑动 */
+#tlg-panel #tlg-tabs { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+#tlg-panel #tlg-tabs::-webkit-scrollbar { display: none; }
