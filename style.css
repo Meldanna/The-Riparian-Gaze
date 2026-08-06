@@ -227,3 +227,6 @@
   text-shadow: 0 0 8px rgba(255,255,255,0.5);
 }
 .tlg-subtab:hover { color: rgba(255,255,255,0.8); }
+/* 地理小窗隐藏滚动条但保留滑动 */
+#tlg-geo-infobox .tlg-archive-brief::-webkit-scrollbar { display: none; }
+#tlg-geo-infobox .tlg-archive-brief { scrollbar-width: none; -ms-overflow-style: none; }
