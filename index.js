@@ -2011,7 +2011,6 @@ function updateGeoInfoBox() {
     var wrap = geoCanvas && geoCanvas.parentElement;
     if (!wrap) return;
     if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
-    wrap.style.overflow = "visible";  // ← 加这一行
 
     var box = document.getElementById("tlg-geo-infobox");
 
@@ -2130,20 +2129,9 @@ function initGeoCanvas() {
         if (!geoDragMoved) {
             var hit = geoHitTest(x, y);
             geoSelectedPath = (hit && geoSelectedPath === hit) ? null : hit;
-            // 选中节点后，如果节点像素位置超出 canvas 可视区域，自动平移使其居中
-            if (geoSelectedPath) {
-                var nodes = layoutGeoNodes(), nd = null;
-                for (var i = 0; i < nodes.length; i++) { if (nodes[i].fullPath === geoSelectedPath) { nd = nodes[i]; break; } }
-                if (nd) {
-                    var cw = c.offsetWidth, ch = c.offsetHeight;
-                    var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
-                    var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
-                    var margin = 60;
-                    if (px < margin || px > cw - margin || py < margin || py > ch - margin) {
-                        geoCamX = -nd.x * geoCamZoom;
-                        geoCamY = -nd.y * geoCamZoom;
-                    }
-                }
+            renderGeoCanvas();
+        }
+    }
             }
             renderGeoCanvas();
         }
@@ -3036,10 +3024,10 @@ function showEditItemModal(itemName, itemData) {
             // ═══ 世界档案 ═══
             '<div class="tlg-view" data-view="worldarchive"><div class="tlg-scroll-panel" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">' +
             // 子标签
-            '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;">' +
-            '<div class="tlg-subtab active" data-subtab="geo" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">地理</div>' +
-            '<div class="tlg-subtab" data-subtab="npc" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">样本库</div>' +
-            '<div class="tlg-subtab" data-subtab="items" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;">物品</div>' +
+            '<div style="display:flex;border-bottom:1px solid #1a1a28;flex-shrink:0;padding:0 14px;">' +
+            '<div class="tlg-subtab active" data-subtab="geo" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">地理</div>' +
+            '<div class="tlg-subtab" data-subtab="npc" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">样本库</div>' +
+            '<div class="tlg-subtab" data-subtab="items" style="padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;color:rgba(255,255,255,0.5);">物品</div>' +
             '</div>' +
             // 地理子面板
             '<div class="tlg-subpanel active" data-subpanel="geo" style="flex:1;overflow:hidden;position:relative;">' +
@@ -3052,19 +3040,15 @@ function showEditItemModal(itemName, itemData) {
             // NPC子面板
             '<div class="tlg-subpanel" data-subpanel="npc" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
-            '<div style="font-size:13px;font-weight:600;color:#ffffff;flex:none;">样本库</div>' +
-            '<div style="flex:1;"></div>' +
-            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:5px 8px;font-size:11px;flex:none;height:28px;line-height:28px;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
-            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:5px 10px;flex:none;height:28px;line-height:18px;">+ 新建</button>' +
+            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:5px 8px;font-size:11px;height:28px;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
+            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:5px 10px;height:28px;">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-npc-list"></div>' +
             '</div>' +
             // 物品子面板
             '<div class="tlg-subpanel" data-subpanel="items" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
-            '<div style="font-size:13px;font-weight:600;color:#e8e8f0;">物品追踪</div>' +
-            '<div style="flex:1;"></div>' +
-            '<button type="button" class="tlg-btn" id="tlg-item-add" style="font-size:11px;padding:4px 10px;flex:none;">+ 新建</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-item-add" style="font-size:11px;padding:5px 10px;height:28px;">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-items-list"></div>' +
             '</div>' +
