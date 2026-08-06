@@ -2040,7 +2040,7 @@ function updateGeoInfoBox() {
             (node.isCurrent ? ' <span style="color:#7a7a8a;font-size:11px;">◎ 当前</span>' : '') + '</div>' +
             '<div class="tlg-archive-meta" style="font-size:11px;">' + escHtml(geoSelectedPath) +
             (node.locked ? ' · ⊚' : '') + '</div>' +
-            '<div class="tlg-archive-brief" style="font-size:12px;max-height:60px;overflow:hidden;">' +
+            '<div class="tlg-archive-brief" style="font-size:12px;max-height:120px;overflow-y:auto;-webkit-overflow-scrolling:touch;">' +
             (node.desc ? escHtml(node.desc) : '<span style="color:#7a7a8a;">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-infobox-edit" ' +
@@ -2441,23 +2441,32 @@ function refreshNpcList() {
         var mvuBars = "";
         if (mvuData && mvuData[name]) {
             var md = mvuData[name];
-            if (md.hp !== undefined) {
-                var hpPct = Math.round(md.hp / (md.hpMax || 100) * 100);
-                mvuBars += '<div style="margin-top:4px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">生命 ' + md.hp + '/' + md.hpMax + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(80,180,160,0.5),rgba(150,230,210,0.8));height:100%;width:' + hpPct + '%;"></div></div></div>';
-            }
-            if (md.mp !== undefined) {
-                var mpPct = Math.round(md.mp / (md.mpMax || 100) * 100);
-                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">法力 ' + md.mp + '/' + md.mpMax + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(80,120,200,0.5),rgba(140,180,250,0.8));height:100%;width:' + mpPct + '%;"></div></div></div>';
-            }
-            if (md["好感度"] !== undefined) {
-                var bondPct = Math.min(100, Math.max(0, md["好感度"]));
-                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">好感 ' + md["好感度"] + '/100</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(180,150,100,0.4),rgba(230,210,160,0.7));height:100%;width:' + bondPct + '%;"></div></div></div>';
-            }
-            if (md["暧昧值"]) {
-                var ambPct = Math.min(100, Math.max(0, md["暧昧值"]));
-                mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">暧昧 ' + md["暧昧值"] + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(200,120,160,0.4),rgba(250,180,210,0.7));height:100%;width:' + ambPct + '%;"></div></div></div>';
+            var mvuKeys = Object.keys(md);
+            for (var mk = 0; mk < mvuKeys.length; mk++) {
+                var k = mvuKeys[mk];
+                var val = md[k];
+                // 有对应 Max 值的数值：渲染进度条
+                var maxKey = k + "Max";
+                if (typeof val === "number" && md[maxKey] !== undefined) {
+                    var max = md[maxKey] || 100;
+                    var pct = Math.min(100, Math.max(0, Math.round(val / max * 100)));
+                    var barColor = pct > 50 ? "rgba(100,200,180,0.6),rgba(150,230,210,0.8)" : pct > 25 ? "rgba(200,180,80,0.5),rgba(230,210,120,0.7)" : "rgba(200,80,80,0.5),rgba(230,120,120,0.7)";
+                    mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + ' ' + val + '/' + max + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,' + barColor + ');height:100%;width:' + pct + '%;"></div></div></div>';
+                    continue;
+                }
+                // 跳过 Max 键本身
+                if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) continue;
+                // 普通数值（无 Max）：显示数值 + 简易条（假设满值100）
+                if (typeof val === "number") {
+                    var pct2 = Math.min(100, Math.max(0, val));
+                    mvuBars += '<div style="margin-top:3px;"><div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + ' ' + val + '</div><div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:2px;height:8px;overflow:hidden;margin-top:2px;"><div style="background:linear-gradient(90deg,rgba(160,140,120,0.4),rgba(200,180,160,0.6));height:100%;width:' + pct2 + '%;"></div></div></div>';
+                    continue;
+                }
+                // 非数值：文本显示
+                mvuBars += '<div style="margin-top:2px;font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(k) + '：' + escHtml(String(Array.isArray(val) ? val.join(", ") : val)) + '</div>';
             }
         }
+
         return '<div class="tlg-archive-card">' +
             '<div style="display:flex;align-items:center;gap:8px;">' +
             '<div style="width:' + dotSize + ';height:' + dotSize + ';border-radius:50%;background:#ffffff;flex-shrink:0;' + dotGlow + '"></div>' +
@@ -2936,8 +2945,8 @@ function showEditItemModal(itemName, itemData) {
                 '<button type="button" class="tlg-btn tlg-worlds-export" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">提取源数据</button>' +
                 '</div></div>';
         }).join("");
-        container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
-        container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
+        container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; saveCurrentWorld(); currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.memories = w.memories || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; saveWorlds(); toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
+        container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; saveCurrentWorld(); worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.memories = w.memories || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
         container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖"); }); });
         container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
         container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩"); }); });
