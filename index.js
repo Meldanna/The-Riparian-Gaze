@@ -2005,16 +2005,20 @@ function renderGeoCanvas() {
 }
 
 // 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
+// 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
 // 修复：改用 position:absolute 挂到 canvas 父容器；用 requestAnimationFrame 延迟读尺寸
 function updateGeoInfoBox() {
+    var wrap = geoCanvas && geoCanvas.parentElement;
+    if (!wrap) return;
+    if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+
     var box = document.getElementById("tlg-geo-infobox");
 
-    if (!geoSelectedPath || !geoCanvas) {
+    if (!geoSelectedPath) {
         if (box) box.style.display = "none";
         geoInfoBoxPath = null;
         return;
     }
-
     var node = getGeoNodeByPath(geoSelectedPath);
     if (!node) {
         if (box) box.style.display = "none";
@@ -2022,23 +2026,21 @@ function updateGeoInfoBox() {
         return;
     }
 
-    // 小窗挂在 body 上，用 fixed 定位，不受 canvas 容器 overflow 限制
     if (!box) {
         box = document.createElement("div");
         box.id = "tlg-geo-infobox";
-        box.style.cssText = "position:fixed;z-index:2147483640;width:220px;max-width:70vw;pointer-events:auto;display:none;font-size:12px;";
-        document.body.appendChild(box);
+        box.style.cssText = "position:absolute;z-index:10;width:200px;max-width:60vw;pointer-events:auto;display:none;font-size:12px;";
+        wrap.appendChild(box);
     }
     box.className = "tlg-archive-card" + (node.isCurrent ? " current" : "");
 
-    // 内容只在选中节点变化时重新生成
     if (geoInfoBoxPath !== geoSelectedPath) {
         box.innerHTML =
             '<div class="tlg-archive-title" style="font-size:13px;">' + escHtml(node.name) +
             (node.isCurrent ? ' <span style="color:#7a7a8a;font-size:11px;">◎ 当前</span>' : '') + '</div>' +
             '<div class="tlg-archive-meta" style="font-size:11px;">' + escHtml(geoSelectedPath) +
             (node.locked ? ' · ⊚' : '') + '</div>' +
-            '<div class="tlg-archive-brief" style="font-size:12px;max-height:120px;overflow-y:auto;-webkit-overflow-scrolling:touch;">' +
+            '<div class="tlg-archive-brief" style="font-size:12px;max-height:60px;overflow:hidden;">' +
             (node.desc ? escHtml(node.desc) : '<span style="color:#7a7a8a;">暂无简介。</span>') + '</div>' +
             '<div style="display:flex;justify-content:flex-end;margin-top:8px;">' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-geo-infobox-edit" ' +
@@ -2052,10 +2054,7 @@ function updateGeoInfoBox() {
         geoInfoBoxPath = geoSelectedPath;
     }
 
-    // 计算节点在视口中的位置
-    var rect = geoCanvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) { box.style.display = "none"; return; }
-
+    // 先算位置，再显示（避免移动端一帧闪烁到底部）
     var nodes = layoutGeoNodes();
     var nd = null;
     for (var i = 0; i < nodes.length; i++) {
@@ -2063,24 +2062,24 @@ function updateGeoInfoBox() {
     }
     if (!nd) { box.style.display = "none"; return; }
 
-    // 节点在 canvas 内的像素位置 → 转为视口坐标
-    var pxInCanvas = rect.width / 2 + geoCamX + nd.x * geoCamZoom;
-    var pyInCanvas = rect.height / 2 + geoCamY + nd.y * geoCamZoom;
-    var vpX = rect.left + pxInCanvas;
-    var vpY = rect.top + pyInCanvas;
+    var cw = geoCanvas.offsetWidth;
+    var ch = geoCanvas.offsetHeight;
+    if (!cw || !ch) { box.style.display = "none"; return; }
 
-    var boxW = 220, boxH = 140;
-    var gap = 16 * geoCamZoom + 8;
-    var vw = window.innerWidth, vh = window.innerHeight;
+    var NODE_R = 16;
+    var px = cw / 2 + geoCamX + nd.x * geoCamZoom;
+    var py = ch / 2 + geoCamY + nd.y * geoCamZoom;
 
-    // 横向：优先右侧，放不下就左侧
-    var left = vpX + gap;
-    if (left + boxW > vw - 8) left = vpX - gap - boxW;
-    left = Math.max(8, Math.min(left, vw - 60));
+    // 先用预估高度定位（避免依赖 offsetHeight）
+    var boxW = 200, boxH = 120;
+    var gap = NODE_R * geoCamZoom + 8;
 
-    // 纵向：节点居中偏上
-    var top = vpY - boxH / 3;
-    top = Math.max(8, Math.min(top, vh - 60));
+    var left = px + gap;
+    if (left + boxW > cw - 4) left = px - gap - boxW;
+    left = Math.max(4, Math.min(left, cw - boxW - 4));
+
+    var top = py - boxH / 2;
+    top = Math.max(4, Math.min(top, ch - boxH - 4));
 
     box.style.left = left + "px";
     box.style.top = top + "px";
@@ -2119,7 +2118,7 @@ function initGeoCanvas() {
     function handleMove(x, y) {
         if (!geoIsPanning) return;
         var dx = x - geoMouseDownX, dy = y - geoMouseDownY;
-        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) geoDragMoved = true;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) geoDragMoved = true;
         geoCamX = x - geoPanStartX; geoCamY = y - geoPanStartY;
         renderGeoCanvas();
     }
@@ -3131,9 +3130,7 @@ function showEditItemModal(itemName, itemData) {
             renderCanvas(); requestAnimationFrame(animLoop);
         })();
     }
-    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; 
-                            var geoBox = document.getElementById("tlg-geo-infobox"); if (geoBox) geoBox.remove();
-    }
+    function closePanel() { var panel = document.getElementById("tlg-panel"); if (panel) panel.style.display = "none"; document.body.style.overflow = ""; }
 
     function switchTab(name) {
         var panel = document.getElementById("tlg-panel"); if (!panel) return;
@@ -3277,7 +3274,6 @@ function showEditItemModal(itemName, itemData) {
             tab.onclick = function() {
                 panel.querySelectorAll(".tlg-subtab").forEach(function(t) { t.classList.remove("active"); t.style.color = "#6a6a78"; t.style.borderBottomColor = "transparent"; });
                 panel.querySelectorAll(".tlg-subpanel").forEach(function(p) { p.style.display = "none"; p.classList.remove("active"); });
-                if (document.getElementById("tlg-geo-infobox")) document.getElementById("tlg-geo-infobox").style.display = "none";
                 tab.classList.add("active"); tab.style.color = "#e8e8f0"; tab.style.borderBottomColor = "#c0c0c8";
                 var target = panel.querySelector('.tlg-subpanel[data-subpanel="' + tab.dataset.subtab + '"]');
                 if (target) { target.style.display = ""; target.classList.add("active"); }
@@ -3524,7 +3520,7 @@ function showEditItemModal(itemName, itemData) {
                 });
             }
         } catch (e) {}
-        console.log("[TLG] 河岸凝视 v3.6 已上线");
+        console.log("[TLG] 河岸凝视 v3 已上线");
     }
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
