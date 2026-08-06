@@ -1374,37 +1374,82 @@
         }
     }
 
-    function applyGeoUpdates(location, lockedWorldId) {
+        function applyGeoUpdates(location, lockedWorldId) {
         if (!location || !lockedWorldId || !worlds[lockedWorldId]) return;
         if (!worlds[lockedWorldId].geoTree) worlds[lockedWorldId].geoTree = {};
         var tree = worlds[lockedWorldId].geoTree;
         var path = location.path;
         if (!Array.isArray(path) || !path.length) return;
 
-        // ── 地名模糊去重：检查新地名是否与已有地名语义相似 ──
-    function findSimilarName(siblings, newName) {
+        // ── 工具：标准化地名用于比较 ──
+        var SUFFIXES = /[城镇村国区街路府殿宫楼阁谷山洞岛市县省堡寨营坊]$/;
+        function normalize(name) {
+            return name.toLowerCase()
+                .replace(/\s+/g, "")
+                .replace(/[（(].*?[）)]/g, "")  // 去括号及其内容
+                .replace(SUFFIXES, "");
+        }
+
+        // ── 模糊匹配：两个地名是否指同一个地方 ──
+        function isSimilar(a, b) {
+            var na = normalize(a), nb = normalize(b);
+            if (!na || !nb) return a.toLowerCase().replace(/\s+/g, "") === b.toLowerCase().replace(/\s+/g, "");
+            if (na === nb) return true;
+            // 包含关系（核心词至少2字）
+            if (na.length >= 2 && nb.length >= 2) {
+                if (na.indexOf(nb) !== -1 || nb.indexOf(na) !== -1) return true;
+            }
+            // 带括号的原文也做一次：如 "珠宝店" vs "格林德尔之牙（珠宝店）"
+            var aInParen = (a.match(/[（(](.+?)[）)]/) || [])[1];
+            var bInParen = (b.match(/[（(](.+?)[）)]/) || [])[1];
+            if (aInParen && isSimilar(aInParen, b)) return true;
+            if (bInParen && isSimilar(bInParen, a)) return true;
+            return false;
+        }
+
+        // ── 在同级兄弟中查找相似名 ──
+        function findSimilarInLevel(siblings, newName) {
             var keys = Object.keys(siblings);
-            var lower = newName.toLowerCase().replace(/\s+/g, "");
             for (var i = 0; i < keys.length; i++) {
-                var existing = keys[i];
-                var eLower = existing.toLowerCase().replace(/\s+/g, "");
-                // 完全相同
-                if (eLower === lower) return existing;
-                // 包含关系（如"北京"包含在"北京城"中，或"京城"是"北京"的子串）
-                if (eLower.indexOf(lower) !== -1 || lower.indexOf(eLower) !== -1) return existing;
-                // 去除常见后缀后相同（城/镇/村/国/区/街/路/府/殿/宫/楼/阁/谷/山/洞/岛）
-                var suffixes = /[城镇村国区街路府殿宫楼阁谷山洞岛市县省]$/;
-                var a = eLower.replace(suffixes, ""), b = lower.replace(suffixes, "");
-                if (a && b && a.length >= 2 && (a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1)) return existing;
+                if (isSimilar(keys[i], newName)) return keys[i];
             }
             return null;
         }
 
-        // 标准化路径：逐级检查是否有相似名
+        // ── 全局搜索：在整棵树中查找某个地名，返回其完整路径 ──
+        function findInTree(obj, targetName, currentPath) {
+            var keys = Object.keys(obj);
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                if (isSimilar(k, targetName)) {
+                    return { path: currentPath.concat([k]), node: obj[k] };
+                }
+                if (obj[k].children) {
+                    var deeper = findInTree(obj[k].children, targetName, currentPath.concat([k]));
+                    if (deeper) return deeper;
+                }
+            }
+            return null;
+        }
+
+        // ── 路径修复：如果传入路径的第一级在 root 找不到，尝试全局搜索 ──
+        // 例如 AI 返回 ["灰石镇","酒馆"]，但 "灰石镇" 实际在 ["维利亚王国","灰石镇"]
+        // 修复后路径变为 ["维利亚王国","灰石镇","酒馆"]
+        var rootMatch = findSimilarInLevel(tree, path[0]);
+        if (!rootMatch) {
+            // root 里没有 → 搜全树
+            var globalHit = findInTree(tree, path[0], []);
+            if (globalHit) {
+                // 找到了，把已有路径前缀拼上去
+                path = globalHit.path.concat(path.slice(1));
+            }
+        }
+
+        // ── 标准化路径：逐级在同级兄弟中做模糊匹配 ──
         var normalizedPath = [];
         var cur0 = tree;
         for (var p = 0; p < path.length; p++) {
-            var similar = findSimilarName(cur0, path[p]);
+            var similar = findSimilarInLevel(cur0, path[p]);
             var useName = similar || path[p];
             normalizedPath.push(useName);
             if (!cur0[useName]) cur0[useName] = { desc: "", locked: false, isCurrent: false, children: {} };
@@ -1412,7 +1457,7 @@
         }
         path = normalizedPath;
 
-        // 清除所有 isCurrent 标记
+        // ── 清除所有 isCurrent 标记 ──
         function clearCurrent(obj) {
             var keys = Object.keys(obj);
             for (var i = 0; i < keys.length; i++) {
@@ -1422,7 +1467,7 @@
         }
         clearCurrent(tree);
 
-        // 沿 path 更新节点属性
+        // ── 沿路径更新节点属性 ──
         var cur = tree;
         for (var i = 0; i < path.length; i++) {
             var name = path[i];
@@ -1433,13 +1478,19 @@
             cur = cur[name].children;
         }
 
-        // 如果有 moved_from，也创建起点路径（同样做模糊匹配）
+        // ── moved_from 同样处理 ──
         if (Array.isArray(location.moved_from) && location.moved_from.length) {
+            var mfPath = location.moved_from;
+            // 同样做全局搜索修复
+            var mfRoot = findSimilarInLevel(tree, mfPath[0]);
+            if (!mfRoot) {
+                var mfHit = findInTree(tree, mfPath[0], []);
+                if (mfHit) mfPath = mfHit.path.concat(mfPath.slice(1));
+            }
             var cur2 = tree;
-            for (var j = 0; j < location.moved_from.length; j++) {
-                var n2 = location.moved_from[j];
-                var sim2 = findSimilarName(cur2, n2);
-                var use2 = sim2 || n2;
+            for (var j = 0; j < mfPath.length; j++) {
+                var sim2 = findSimilarInLevel(cur2, mfPath[j]);
+                var use2 = sim2 || mfPath[j];
                 if (!cur2[use2]) cur2[use2] = { desc: "", locked: false, isCurrent: false, children: {} };
                 cur2 = cur2[use2].children;
             }
