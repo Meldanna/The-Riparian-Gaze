@@ -2119,7 +2119,7 @@ function initGeoCanvas() {
     function handleMove(x, y) {
         if (!geoIsPanning) return;
         var dx = x - geoMouseDownX, dy = y - geoMouseDownY;
-        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) geoDragMoved = true;
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) geoDragMoved = true;
         geoCamX = x - geoPanStartX; geoCamY = y - geoPanStartY;
         renderGeoCanvas();
     }
