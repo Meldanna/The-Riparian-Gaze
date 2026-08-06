@@ -2141,9 +2141,10 @@ function initGeoCanvas() {
         // 触屏支持（单指拖动 + 双指缩放，与因果树一致）
     var geoLastTouchDist = 0;
     c.ontouchstart = function(e) {
-        if (e.touches.length === 1) { var t = e.touches[0]; handleDown(t.clientX, t.clientY); }
-        else if (e.touches.length === 2) { geoIsPanning = false; geoLastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
-    };
+    e.preventDefault(); // ← 加这一行
+    if (e.touches.length === 1) { var t = e.touches[0]; handleDown(t.clientX, t.clientY); }
+    else if (e.touches.length === 2) { geoIsPanning = false; geoLastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
+};
     c.ontouchmove = function(e) {
         if (e.touches.length === 1 && geoIsPanning) { e.preventDefault(); var t = e.touches[0]; handleMove(t.clientX, t.clientY); }
         else if (e.touches.length === 2) {
@@ -3520,7 +3521,7 @@ function showEditItemModal(itemName, itemData) {
                 });
             }
         } catch (e) {}
-        console.log("[TLG] 河岸凝视 v3 已上线");
+        console.log("[TLG] 河岸凝视 v3.6 已上线");
     }
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
