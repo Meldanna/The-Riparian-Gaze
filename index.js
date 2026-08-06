@@ -1381,6 +1381,37 @@
         var path = location.path;
         if (!Array.isArray(path) || !path.length) return;
 
+        // ── 地名模糊去重：检查新地名是否与已有地名语义相似 ──
+    function findSimilarName(siblings, newName) {
+            var keys = Object.keys(siblings);
+            var lower = newName.toLowerCase().replace(/\s+/g, "");
+            for (var i = 0; i < keys.length; i++) {
+                var existing = keys[i];
+                var eLower = existing.toLowerCase().replace(/\s+/g, "");
+                // 完全相同
+                if (eLower === lower) return existing;
+                // 包含关系（如"北京"包含在"北京城"中，或"京城"是"北京"的子串）
+                if (eLower.indexOf(lower) !== -1 || lower.indexOf(eLower) !== -1) return existing;
+                // 去除常见后缀后相同（城/镇/村/国/区/街/路/府/殿/宫/楼/阁/谷/山/洞/岛）
+                var suffixes = /[城镇村国区街路府殿宫楼阁谷山洞岛市县省]$/;
+                var a = eLower.replace(suffixes, ""), b = lower.replace(suffixes, "");
+                if (a && b && a.length >= 2 && (a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1)) return existing;
+            }
+            return null;
+        }
+
+        // 标准化路径：逐级检查是否有相似名
+        var normalizedPath = [];
+        var cur0 = tree;
+        for (var p = 0; p < path.length; p++) {
+            var similar = findSimilarName(cur0, path[p]);
+            var useName = similar || path[p];
+            normalizedPath.push(useName);
+            if (!cur0[useName]) cur0[useName] = { desc: "", locked: false, isCurrent: false, children: {} };
+            cur0 = cur0[useName].children;
+        }
+        path = normalizedPath;
+
         // 清除所有 isCurrent 标记
         function clearCurrent(obj) {
             var keys = Object.keys(obj);
@@ -1391,13 +1422,10 @@
         }
         clearCurrent(tree);
 
-        // 沿 path 创建/更新节点
+        // 沿 path 更新节点属性
         var cur = tree;
         for (var i = 0; i < path.length; i++) {
             var name = path[i];
-            if (!cur[name]) {
-                cur[name] = { desc: "", locked: false, isCurrent: false, children: {} };
-            }
             if (i === path.length - 1) {
                 if (!cur[name].locked && location.desc) cur[name].desc = location.desc;
                 if (location.is_current) cur[name].isCurrent = true;
@@ -1405,17 +1433,18 @@
             cur = cur[name].children;
         }
 
-        // 如果有 moved_from，也创建起点路径（不标 isCurrent）
+        // 如果有 moved_from，也创建起点路径（同样做模糊匹配）
         if (Array.isArray(location.moved_from) && location.moved_from.length) {
             var cur2 = tree;
             for (var j = 0; j < location.moved_from.length; j++) {
                 var n2 = location.moved_from[j];
-                if (!cur2[n2]) cur2[n2] = { desc: "", locked: false, isCurrent: false, children: {} };
-                cur2 = cur2[n2].children;
+                var sim2 = findSimilarName(cur2, n2);
+                var use2 = sim2 || n2;
+                if (!cur2[use2]) cur2[use2] = { desc: "", locked: false, isCurrent: false, children: {} };
+                cur2 = cur2[use2].children;
             }
         }
         saveWorlds();
-        if (typeof refreshGeoTree === "function") refreshGeoTree();
     }
 
     function applyNpcUpdates(characters, lockedWorldId, turnTime) {
@@ -1499,6 +1528,53 @@
         var bar = document.getElementById("tlg-digest-grace-bar");
         if (bar) bar.style.display = "none";
     }
+    // 从消息HTML中去除标签，保留纯文本
+    function stripHtmlTags(html) {
+        return String(html || "")
+            .replace(/<thinking[\s\S]*?<\/thinking>/gi, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+            .replace(/\s{2,}/g, " ")
+            .trim();
+    }
+
+    // 从AI回复开头的美化标签中提取时间/地点
+    function extractHeaderMeta(html) {
+        var meta = { time: "", location: "" };
+        if (!html) return meta;
+        // 去掉thinking后，取开头的标签块内容
+        var cleaned = html.replace(/<thinking[\s\S]*?<\/thinking>/gi, "").trim();
+        // 取第一个块级标签的全部文本（通常是状态面板）
+        var headerMatch = cleaned.match(/^(<(?:div|header|section|table|p)[^>]*>[\s\S]*?<\/(?:div|header|section|table|p)>)/i);
+        var headerText = "";
+        if (headerMatch) {
+            headerText = headerMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        }
+        if (!headerText) {
+            // 兜底：取前200字符的纯文本
+            headerText = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+        }
+        // 提取时间
+        var timePatterns = [
+            /(?:时间|日期|TIME|当前时间)[：:\s]*([^\n|;；,，<]{2,20})/i,
+            /(第[一二三四五六七八九十百千\d]+[天日章回幕][\s\S]{0,10}?(?:清晨|早上|上午|中午|下午|傍晚|黄昏|入夜|夜晚|深夜|子时|丑时|寅时|卯时|辰时|巳时|午时|未时|申时|酉时|戌时|亥时)?)/,
+            /((?:黎明|清晨|早上|上午|中午|下午|傍晚|黄昏|入夜|夜晚|深夜|子时|丑时|寅时|卯时|辰时|巳时|午时|未时|申时|酉时|戌时|亥时)[前后]?)/
+        ];
+        for (var ti = 0; ti < timePatterns.length; ti++) {
+            var tm = headerText.match(timePatterns[ti]);
+            if (tm) { meta.time = (tm[1] || tm[0]).replace(/^(?:时间|日期|TIME|当前时间)[：:\s]*/i, "").trim(); break; }
+        }
+        // 提取地点
+        var locPatterns = [
+            /(?:地点|位置|location|场景|所在)[：:\s]*([^\n|;；,，<]{2,30})/i
+        ];
+        for (var li = 0; li < locPatterns.length; li++) {
+            var lm = headerText.match(locPatterns[li]);
+            if (lm && lm[1]) { meta.location = lm[1].trim(); break; }
+        }
+        return meta;
+    }
 
     function runDigestRequest(retryCount) {
         retryCount = retryCount || 0;
@@ -1523,13 +1599,17 @@
         for (var j = st.chat.length - 1; j >= 0; j--) {
             if (st.chat[j].is_user && st.chat[j].mes) { userMsg = st.chat[j]; break; }
         }
+        var rawAI = lastMsg.mes || "";
+        var headerMeta = extractHeaderMeta(rawAI);
 
-        var turnTime = getTurnTime();
         var context = "";
-        if (userMsg) context += (userMsg.name || "User") + ": " + (userMsg.mes || "") + "\n";
-        context += (lastMsg.name || "AI") + ": " + (lastMsg.mes || "");
+        if (userMsg) context += (userMsg.name || "User") + ": " + stripHtmlTags(userMsg.mes) + "\n";
+        context += (lastMsg.name || "AI") + ": " + stripHtmlTags(rawAI);
 
-        var turnTimeHint = turnTime ? "系统提供的当前游戏时间：" + turnTime : "（系统未提供游戏时间，请从正文中提取）";
+        var turnTime = getTurnTime() || headerMeta.time || "";
+        var turnTimeHint = turnTime ? "系统提供的当前游戏时间：" + turnTime : "（系统未提供游戏时间，请从正文开头的状态面板中提取）";
+        if (headerMeta.location) turnTimeHint += "\n系统提供的当前地点：" + headerMeta.location;
+
         var prompt = digestPrompt
             .replace(/\{\{turn_time_hint\}\}/g, turnTimeHint)
             .replace(/\{\{turn_time\}\}/g, turnTime || "")
@@ -1600,7 +1680,7 @@
             }
         });
     }
-    function runCatchupDigest() {
+function runCatchupDigest() {
     var st = getST(); if (!st || !st.chat || !st.chat.length) { toast("当前无聊天消息。"); return; }
     var digestUrl = (globalApi.digestUrl || "").trim();
     var digestKey = (globalApi.digestKey || "").trim();
@@ -1656,7 +1736,12 @@
         var context = "";
         for (var m = 0; m < batch.length; m++) {
             var msg = batch[m].msg;
-            context += (msg.is_user ? (msg.name || "User") : (msg.name || "AI")) + ": " + (msg.mes || "") + "\n";
+            var msgText = stripHtmlTags(msg.mes);
+            context += (msg.is_user ? (msg.name || "User") : (msg.name || "AI")) + ": " + msgText + "\n";
+            if (!msg.is_user && m === batch.length - 1) {
+                var batchMeta = extractHeaderMeta(msg.mes);
+                if (batchMeta.time && !turnTime) turnTime = batchMeta.time;
+            }
         }
 
         var turnTime = ""; // 补全时无法获取精确游戏时间，留空让 AI 从正文提取
@@ -2430,8 +2515,25 @@ function showNpcDetailModal(name) {
     var mvuData = getMvuNpcData();
     var mvuHtml = "";
     if (mvuData && mvuData[name]) {
-        var md = mvuData[name];
-        var rows = Object.keys(md).map(function(k) { return '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.1);"><span style="color:rgba(255,255,255,0.6)">' + escHtml(k) + '</span><span>' + escHtml(String(Array.isArray(md[k]) ? md[k].join(", ") : md[k])) + '</span></div>'; }).join("");
+                var md = mvuData[name];
+        var rows = Object.keys(md).map(function(k) {
+            var val = md[k];
+            // 检测是否为数值型且有对应的 Max 值（如 hp/hpMax, mp/mpMax）
+            var maxKey = k + "Max";
+            if (typeof val === "number" && md[maxKey] !== undefined) {
+                var max = md[maxKey] || 100;
+                var pct = Math.min(100, Math.max(0, (val / max) * 100));
+                var color = pct > 50 ? "rgba(100,220,180,0.7)" : pct > 25 ? "rgba(220,180,80,0.7)" : "rgba(220,80,80,0.7)";
+                return '<div style="padding:4px 0;">' +
+                    '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span style="color:rgba(255,255,255,0.6)">' + escHtml(k) + '</span><span>' + val + ' / ' + max + '</span></div>' +
+                    '<div style="height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:3px;transition:width 0.3s;"></div></div>' +
+                    '</div>';
+            }
+            // 跳过 Max 后缀的键（已在上面渲染过了）
+            if (k.endsWith("Max") && md[k.replace("Max", "")] !== undefined) return "";
+            // 普通键值对
+            return '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.1);"><span style="color:rgba(255,255,255,0.6)">' + escHtml(k) + '</span><span>' + escHtml(String(Array.isArray(val) ? val.join(", ") : val)) + '</span></div>';
+        }).filter(Boolean).join("");
         mvuHtml = '<div class="tlg-section" style="margin-bottom:12px;"><div class="tlg-section-title" style="font-size:11px;">MVU 实时数据</div>' + rows + '</div>';
     } else {
         mvuHtml = '<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:12px;">暂无 MVU 实时数据。</div>';
@@ -2554,18 +2656,37 @@ function showAddNpcModal() {
 function buildItemMap() {
     var memories = state.memories || [];
     var itemMap = {}; // name → { history: [], owner, holder, state, desc }
+
+    // 物品名模糊去重：找已有的相似名
+    function findSimilarItem(map, newName) {
+        var keys = Object.keys(map);
+        var lower = newName.toLowerCase().replace(/\s+/g, "");
+        for (var i = 0; i < keys.length; i++) {
+            var existing = keys[i];
+            var eLower = existing.toLowerCase().replace(/\s+/g, "");
+            if (eLower === lower) return existing;
+            if (eLower.indexOf(lower) !== -1 || lower.indexOf(eLower) !== -1) return existing;
+            // 去除量词/修饰词后比较核心名
+            var coreA = eLower.replace(/^(一把|一柄|一块|一枚|一颗|一件|一本|一瓶|那个|这个|那把|这把)/, "");
+            var coreB = lower.replace(/^(一把|一柄|一块|一枚|一颗|一件|一本|一瓶|那个|这个|那把|这把)/, "");
+            if (coreA && coreB && coreA.length >= 2 && (coreA === coreB || coreA.indexOf(coreB) !== -1 || coreB.indexOf(coreA) !== -1)) return existing;
+        }
+        return null;
+    }
+
     for (var i = 0; i < memories.length; i++) {
         var items = memories[i].items || [];
         for (var j = 0; j < items.length; j++) {
             var item = items[j]; if (!item.name) continue;
-            if (!itemMap[item.name]) itemMap[item.name] = { history: [], owner: "", holder: "", state: "", desc: "" };
-            itemMap[item.name].history.push({ change: item.change || "", owner: item.owner || "", state: item.state || "", turnIdx: memories[i].turnIdx, timestamp: memories[i].timestamp });
+            // 模糊匹配已有物品名
+            var standardName = findSimilarItem(itemMap, item.name) || item.name;
+            if (!itemMap[standardName]) itemMap[standardName] = { history: [], owner: "", holder: "", state: "", desc: "" };
+            itemMap[standardName].history.push({ change: item.change || "", owner: item.owner || "", state: item.state || "", turnIdx: memories[i].turnIdx, timestamp: memories[i].timestamp });
             if (item.owner) {
-                itemMap[item.name].owner = item.owner;
-                // 自动提取默认不区分"借用"，先让持有者跟随所有者，后续可在编辑框中手动改成借用人
-                itemMap[item.name].holder = item.owner;
+                itemMap[standardName].owner = item.owner;
+                itemMap[standardName].holder = item.owner;
             }
-            if (item.state) itemMap[item.name].state = item.state;
+            if (item.state) itemMap[standardName].state = item.state;
         }
     }
     var w = currentWorldId && worlds[currentWorldId] ? worlds[currentWorldId] : null;
@@ -2715,6 +2836,40 @@ function showEditItemModal(itemName, itemData) {
         saveWorlds(); bd.remove(); refreshItemsList(); toast("已抹除");
     };
 }
+
+    function showAddItemModal() {
+        var bd = tlgModalBackdrop("tlg-item-add-modal");
+        bd.innerHTML = '<div class="tlg-modal">' +
+            '<div class="tlg-modal-title">+ 添加物品</div>' +
+            tlgField("物品名称", '<input type="text" class="tlg-input" id="tlg-item-add-name" placeholder="物品全称" />') +
+            tlgField("描述", '<textarea class="tlg-textarea" id="tlg-item-add-desc"></textarea>') +
+            tlgField("当前状态", '<input type="text" class="tlg-input" id="tlg-item-add-state" placeholder="完好/损毁/激活等" />') +
+            tlgField("所有者",
+                '<input type="text" class="tlg-input" id="tlg-item-add-owner" list="tlg-item-add-owner-list" placeholder="选择或输入角色名" />' +
+                '<datalist id="tlg-item-add-owner-list">' + Object.keys(getNpcArchive()).map(function(n) { return '<option value="' + escHtml(n) + '">'; }).join("") + '</datalist>') +
+            tlgField("当前持有者",
+                '<input type="text" class="tlg-input" id="tlg-item-add-holder" list="tlg-item-add-holder-list" placeholder="留空则与所有者相同" />' +
+                '<datalist id="tlg-item-add-holder-list">' + Object.keys(getNpcArchive()).map(function(n) { return '<option value="' + escHtml(n) + '">'; }).join("") + '</datalist>') +
+            tlgActionsRow(tlgBtn("tlg-item-add-cancel", "取消") + tlgBtn("tlg-item-add-ok", "确认", "primary")) +
+            '</div>';
+        document.body.appendChild(bd);
+        bd.querySelector("#tlg-item-add-cancel").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-item-add-ok").onclick = function() {
+            var name = bd.querySelector("#tlg-item-add-name").value.trim();
+            if (!name) { toast("⚠ 物品名称不可为空。"); return; }
+            ensureWorldExists();
+            var w = worlds[currentWorldId];
+            if (!w.itemOverrides) w.itemOverrides = {};
+            w.itemOverrides[name] = {
+                owner: bd.querySelector("#tlg-item-add-owner").value.trim(),
+                holder: bd.querySelector("#tlg-item-add-holder").value.trim() || bd.querySelector("#tlg-item-add-owner").value.trim(),
+                state: bd.querySelector("#tlg-item-add-state").value.trim(),
+                desc: bd.querySelector("#tlg-item-add-desc").value.trim(),
+                deleted: false
+            };
+            saveWorlds(); bd.remove(); refreshItemsList(); toast("∮ 物品已登录：「" + name + "」");
+        };
+    }
 
     function fetchModelList() {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
@@ -2896,17 +3051,21 @@ function showEditItemModal(itemName, itemData) {
             '</div>' +
             // NPC子面板
             '<div class="tlg-subpanel" data-subpanel="npc" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-right:60px;">' +
-            '<div style="font-size:13px;font-weight:600;color:#ffffff;">样本库</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
+            '<div style="font-size:13px;font-weight:600;color:#ffffff;flex:none;">样本库</div>' +
             '<div style="flex:1;"></div>' +
-            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:4px 8px;font-size:11px;flex:none;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
-            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:4px 10px;flex:none;">+ 新建</button>' +
+            '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;padding:5px 8px;font-size:11px;flex:none;height:28px;line-height:28px;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
+            '<button type="button" class="tlg-btn" id="tlg-npc-add" style="font-size:11px;padding:5px 10px;flex:none;height:28px;line-height:18px;">+ 新建</button>' +
             '</div>' +
             '<div id="tlg-npc-list"></div>' +
             '</div>' +
             // 物品子面板
             '<div class="tlg-subpanel" data-subpanel="items" style="flex:1;overflow-y:auto;padding:14px;display:none;">' +
-            '<div style="font-size:13px;font-weight:600;color:#e8e8f0;margin-bottom:12px;">物品追踪</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
+            '<div style="font-size:13px;font-weight:600;color:#e8e8f0;">物品追踪</div>' +
+            '<div style="flex:1;"></div>' +
+            '<button type="button" class="tlg-btn" id="tlg-item-add" style="font-size:11px;padding:4px 10px;flex:none;">+ 新建</button>' +
+            '</div>' +
             '<div id="tlg-items-list"></div>' +
             '</div>' +
             '</div></div>' +
@@ -3150,6 +3309,7 @@ function showEditItemModal(itemName, itemData) {
         var geoResetBtn = document.getElementById("tlg-geo-reset");
         if (geoResetBtn) geoResetBtn.onclick = function() { geoCamX = 0; geoCamY = 0; geoCamZoom = 1; renderGeoCanvas(); };
         // NPC按钮
+        document.getElementById("tlg-item-add").addEventListener("click", function() { showAddItemModal(); });
         var npcAddBtn = document.getElementById("tlg-npc-add");
         if (npcAddBtn) npcAddBtn.onclick = function() { showAddNpcModal(); };
         var npcFilter = document.getElementById("tlg-npc-filter");
