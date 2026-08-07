@@ -460,6 +460,7 @@
 
     // ── 画布 ──
     var ripple = null;
+    var virtualMarkerPos = null;
     function triggerRipple(worldX, worldY) { ripple = { x: worldX, y: worldY, startTime: Date.now() }; }
 
     function layoutTree() {
@@ -551,6 +552,38 @@
             label = node.name.length > 12 ? node.name.slice(0, 11) + "..." : node.name;
             ctx.fillText(label, pos.x, pos.y + NODE_R + 7);
         }
+        // ── 目光停驻之地：当前楼层超出最近锚点时的虚拟延伸 ──
+        virtualMarkerPos = null;
+        var curNode = findNode(state.currentNodeId);
+        var stCtx = getST();
+        var latestFloor = stCtx && stCtx.chat ? stCtx.chat.length - 1 : 0;
+        if (curNode && latestFloor > curNode.msgIdx) {
+            var curPos = positions[curNode.id];
+            if (curPos) {
+                var vx = curPos.x, vy = curPos.y + 110;
+                virtualMarkerPos = { x: vx, y: vy };
+
+                ctx.save();
+                ctx.strokeStyle = "rgba(255,255,255,0.3)";
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(curPos.x, curPos.y + NODE_R);
+                ctx.lineTo(vx, vy - NODE_R * 0.65);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+
+                ctx.beginPath(); ctx.arc(vx, vy, NODE_R * 0.65, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fill();
+                ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1.5; ctx.stroke();
+
+                ctx.fillStyle = "rgba(220,220,230,0.7)";
+                ctx.font = "11px sans-serif";
+                ctx.textAlign = "center"; ctx.textBaseline = "top";
+                ctx.fillText("目光停驻之地", vx, vy + NODE_R * 0.65 + 7);
+            }
+        }
 
         if (ripple) {
             var elapsed = (Date.now() - ripple.startTime) / 1000, maxDur = 0.6;
@@ -581,6 +614,10 @@
         for (var i = 0; i < ids.length; i++) {
             var pos = positions[ids[i]], dx = wx - pos.x, dy = wy - pos.y;
             if (dx * dx + dy * dy <= (NODE_R + 4) * (NODE_R + 4)) return ids[i];
+        }
+        if (virtualMarkerPos) {
+            var vdx = wx - virtualMarkerPos.x, vdy = wy - virtualMarkerPos.y;
+            if (vdx * vdx + vdy * vdy <= (NODE_R * 0.65 + 4) * (NODE_R * 0.65 + 4)) return "__virtual__";
         }
         return null;
     }
@@ -3503,6 +3540,7 @@ function showEditItemModal(itemName, itemData) {
         if (typeof ResizeObserver !== "undefined") { new ResizeObserver(function () {}).observe(wrap); }
         canvas.addEventListener("mousedown", function (e) {
             if (e.button !== 0) return; var hit = canvasHitTest(e.clientX, e.clientY);
+            if (hit === "__virtual__") { showAnchorModal(); return; }
             if (hit) {
                 var rct = canvas.getBoundingClientRect();
                 var wx = (e.clientX - rct.left - rct.width / 2 - camX) / camZoom;
@@ -3527,6 +3565,7 @@ function showEditItemModal(itemName, itemData) {
             else if (e.touches.length === 2) { var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (lastTouchDist > 0) { camZoom = Math.max(0.2, Math.min(4, camZoom * (dist / lastTouchDist))); } lastTouchDist = dist; }
         }, { passive: true });
         canvas.addEventListener("touchend", function (e) {
+          if (!touchMoved && touchStartHit === "__virtual__") { showAnchorModal(); isPanning = false; touchStartHit = null; return; }
             if (!touchMoved && touchStartHit) {
                 var rct = canvas.getBoundingClientRect();
                 var wx = (e.changedTouches[0].clientX - rct.left - rct.width / 2 - camX) / camZoom;
