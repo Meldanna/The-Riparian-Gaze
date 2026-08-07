@@ -1472,7 +1472,16 @@
         for (var i = 0; i < path.length; i++) {
             var name = path[i];
             if (i === path.length - 1) {
-                if (!cur[name].locked && location.desc) cur[name].desc = location.desc;
+if (!cur[name].locked && location.desc) {
+    if (!cur[name].desc) {
+        cur[name].desc = location.desc;
+    } else if (cur[name].desc.indexOf(location.desc) === -1 && location.desc.indexOf(cur[name].desc) === -1) {
+        // 新描述不是旧描述的子串，也不包含旧描述 → 追加
+        cur[name].desc = cur[name].desc + "；" + location.desc;
+    }
+    // 防止无限膨胀：超过300字就截断
+    if (cur[name].desc.length > 300) cur[name].desc = cur[name].desc.slice(0, 300) + "…";
+}
                 if (location.is_current) cur[name].isCurrent = true;
             }
             cur = cur[name].children;
@@ -2413,8 +2422,8 @@ function getMvuNpcData() {
         // 主角
         if (userKey && snap[userKey]) {
             var u = snap[userKey], ue = {};
-            if (u["生理"]) { ue.hp = u["生理"]["健康值"] || 0; ue.hpMax = u["生理"]["上限"] || 100; }
-            if (u["魔法"] && u["魔法"]["上限"] > 0) { ue.mp = u["魔法"]["当前法力"] || 0; ue.mpMax = u["魔法"]["上限"] || 100; }
+            if (u["生理"]) { ue["生命"] = u["生理"]["健康值"] || 0; ue["生命Max"] = u["生理"]["上限"] || 100; }
+            if (u["魔法"] && u["魔法"]["上限"] > 0) { ue["法力"] = u["魔法"]["当前法力"] || 0; ue["法力Max"] = u["魔法"]["上限"] || 100; }
             if (Object.keys(ue).length) result[userKey] = ue;
         }
         // NPC
@@ -2423,8 +2432,8 @@ function getMvuNpcData() {
             var name = npcNames[j], npc = npcLib[name];
             if (!npc || typeof npc !== "object") continue;
             var ne = {};
-            if (npc["生理"]) { ne.hp = npc["生理"]["健康值"] || 0; ne.hpMax = npc["生理"]["上限"] || 100; }
-            if (npc["魔法"] && npc["魔法"]["上限"] > 0) { ne.mp = npc["魔法"]["当前法力"] || 0; ne.mpMax = npc["魔法"]["上限"] || 100; }
+            if (npc["生理"]) { ne["生命"] = npc["生理"]["健康值"] || 0; ne["生命Max"] = npc["生理"]["上限"] || 100; }
+            if (npc["魔法"] && npc["魔法"]["上限"] > 0) { ne["法力"] = npc["魔法"]["当前法力"] || 0; ne["法力Max"] = npc["魔法"]["上限"] || 100; }
             var bond = userBonds[name] || {};
             if (bond["好感度"] !== undefined) ne["好感度"] = bond["好感度"];
             if (bond["暧昧值"] && bond["暧昧值"] > 0) ne["暧昧值"] = bond["暧昧值"];
@@ -2547,7 +2556,7 @@ function refreshNpcList() {
             '<option value="important"' + (tier === "important" ? " selected" : "") + '>重要</option>' +
             '<option value="normal"' + (tier === "normal" ? " selected" : "") + '>普通</option></select>' +
             '<div class="tlg-archive-title" style="flex:1;">' + escHtml(name) + '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-del" data-name="' + escHtml(name) + '" style="width:auto;height:22px;min-height:0;padding:0 8px;flex:0 0 auto;font-size:11px;">坍缩</button>' +
+            '<button type="button" class="tlg-btn tlg-npc-del" data-name="' + escHtml(name) + '" style="width:auto;height:20px;min-height:0;padding:0 6px;flex:0 0 auto;font-size:10px;">坍缩</button>' +
             '</div>' +
             '<div class="tlg-archive-meta">' + escHtml(npc.role || "未知身份") + '</div>' +
             (npc.appearance && npc.appearance.value ? '<div class="tlg-archive-meta">外貌：' + escHtml(npc.appearance.value.slice(0, 50)) + (npc.appearance.value.length > 50 ? "…" : "") + '</div>' : '') +
@@ -2593,13 +2602,13 @@ function showNpcDetailModal(name) {
             "暧昧值": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)",
             "暧昧": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)"
         };
-        
         function getBarColor(key) {
             var lower = key.toLowerCase();
             var keys = Object.keys(BAR_COLORS);
             for (var bi = 0; bi < keys.length; bi++) { if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; }
             return "rgba(100,100,100,0.4),rgba(160,160,160,0.7)";
         }
+
         var rows = Object.keys(md).map(function(k) {
             var val = md[k];
             var maxKey = k + "Max";
@@ -2679,13 +2688,13 @@ function renderNpcTimelineList(container, npc) {
     var list = npc.timeline || [];
     if (!list.length) { container.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-style:italic;font-size:11px">暂无经历。</div>'; return; }
     container.innerHTML = list.map(function(t, idx) {
-        return '<div class="tlg-npc-evt-row" draggable="true" data-idx="' + idx + '" style="border-left:2px solid rgba(255,255,255,0.3);padding:6px 8px;margin-bottom:6px;background:rgba(255,255,255,0.04);border-radius:4px;cursor:grab;display:flex;gap:8px;align-items:flex-start;">' +
-            '<div style="flex:1;min-width:0;">' +
+        return '<div class="tlg-npc-evt-row" draggable="true" data-idx="' + idx + '" style="border-left:2px solid rgba(255,255,255,0.3);padding:6px 8px;margin-bottom:6px;background:rgba(255,255,255,0.04);border-radius:4px;cursor:grab;">' +
             '<div style="font-size:9px;color:rgba(255,255,255,0.5);">' + escHtml(t.timestamp || "?") + (t.auto ? ' · 自动' : ' · 手动') + '</div>' +
-            '<div style="font-size:11px;">' + escHtml(t.event) + '</div>' +
-            '</div>' +
-            '<button type="button" class="tlg-btn tlg-btn-danger tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 8px;font-size:11px;flex-shrink:0;">坍缩</button>' +
-            '</div>';
+            '<div style="font-size:11px;margin-top:2px;">' + escHtml(t.event) + '</div>' +
+            '<div style="display:flex;gap:6px;margin-top:4px;">' +
+            '<button type="button" class="tlg-btn tlg-npc-evt-edit" data-idx="' + idx + '" style="padding:1px 6px;font-size:10px;">✎</button>' +
+            '<button type="button" class="tlg-btn tlg-npc-evt-del" data-idx="' + idx + '" style="padding:1px 6px;font-size:10px;">✕</button>' +
+            '</div></div>';
     }).join("");
 
     var dragSrcIdx = null;
@@ -2701,6 +2710,19 @@ function renderNpcTimelineList(container, npc) {
             list.splice(targetIdx, 0, moved);
             saveWorlds();
             renderNpcTimelineList(container, npc);
+        };
+    });
+    container.querySelectorAll(".tlg-npc-evt-edit").forEach(function(btn) {
+        btn.onclick = function() {
+            var idx = parseInt(btn.dataset.idx, 10);
+            var item = list[idx]; if (!item) return;
+            var newText = prompt("编辑经历内容：", item.event);
+            if (newText !== null && newText.trim()) {
+                list[idx].event = newText.trim();
+                saveWorlds();
+                renderNpcTimelineList(container, npc);
+                toast("经历已更新");
+            }
         };
     });
     container.querySelectorAll(".tlg-npc-evt-del").forEach(function(btn) {
