@@ -898,12 +898,22 @@
             '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
             '<button type="button" class="tlg-btn" id="tlg-vault-catchup" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;"> 补全历史切片</button>' +
             '<button type="button" class="tlg-btn" id="tlg-vault-compress-range" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">⧗ 选范围浓缩</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-danger" id="tlg-vault-clear-all" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;margin-left:auto;">⊖ 清空全部</button>' +
             '</div>';
         container.innerHTML = ctrlHtml + '<div id="tlg-sh-list"></div>';
         renderSummaryList("");
         document.getElementById("tlg-sh-search").addEventListener("input", function () { renderSummaryList(this.value.trim().toLowerCase()); });
         document.getElementById("tlg-vault-catchup").addEventListener("click", runCatchupSummary);
         document.getElementById("tlg-vault-compress-range").addEventListener("click", showCompressRangeModal);
+        document.getElementById("tlg-vault-clear-all").addEventListener("click", function() {
+            if (!state.summaries || !state.summaries.length) { toast("已经是空的"); return; }
+            if (!confirm("确定清空全部 " + state.summaries.length + " 条摘要？此操作不可撤销。")) return;
+            state.summaries = [];
+            saveCurrentWorld(); refreshSummary();
+            renderSummaryList("");
+            toast("已清空全部摘要");
+        });
+
     }
 
     function renderSummaryList(keyword) {
@@ -1446,14 +1456,30 @@
         }
 
         // ── 标准化路径：逐级在同级兄弟中做模糊匹配 ──
+        // ── 标准化路径：逐级在同级兄弟中做模糊匹配，找不到时深搜子树 ──
         var normalizedPath = [];
         var cur0 = tree;
         for (var p = 0; p < path.length; p++) {
             var similar = findSimilarInLevel(cur0, path[p]);
-            var useName = similar || path[p];
-            normalizedPath.push(useName);
-            if (!cur0[useName]) cur0[useName] = { desc: "", locked: false, isCurrent: false, children: {} };
-            cur0 = cur0[useName].children;
+            if (similar) {
+                normalizedPath.push(similar);
+                cur0 = cur0[similar].children;
+            } else {
+                // 当前层级没找到 → 在当前子树中深搜
+                var deepHit = findInTree(cur0, path[p], []);
+                if (deepHit) {
+                    // 找到了，把中间层级补进 normalizedPath
+                    for (var di = 0; di < deepHit.path.length; di++) {
+                        normalizedPath.push(deepHit.path[di]);
+                    }
+                    cur0 = deepHit.node.children;
+                } else {
+                    // 真的是新地点，创建
+                    normalizedPath.push(path[p]);
+                    if (!cur0[path[p]]) cur0[path[p]] = { desc: "", locked: false, isCurrent: false, children: {} };
+                    cur0 = cur0[path[p]].children;
+                }
+            }
         }
         path = normalizedPath;
 
@@ -1669,6 +1695,38 @@ if (!cur[name].locked && location.desc) {
         var turnTime = getTurnTime() || headerMeta.time || "";
         var turnTimeHint = turnTime ? "系统提供的当前游戏时间：" + turnTime : "（系统未提供游戏时间，请从正文开头的状态面板中提取）";
         if (headerMeta.location) turnTimeHint += "\n系统提供的当前地点：" + headerMeta.location;
+        
+        // 注入已有地理路径和物品列表，帮助AI保持命名一致
+        var geoHint = "", itemHint = "";
+        try {
+            var wid = getLinkedWorldId() || currentWorldId;
+            if (wid && worlds[wid]) {
+                var geoPaths = [];
+                function collectGeoPaths(obj, prefix) {
+                    var keys = Object.keys(obj);
+                    for (var gi = 0; gi < keys.length; gi++) {
+                        var fullP = prefix ? prefix + "/" + keys[gi] : keys[gi];
+                        geoPaths.push(fullP);
+                        if (obj[keys[gi]].children) collectGeoPaths(obj[keys[gi]].children, fullP);
+                    }
+                }
+                if (worlds[wid].geoTree) collectGeoPaths(worlds[wid].geoTree, "");
+                if (geoPaths.length) geoHint = "\n\n【已记录地理路径（location.path 必须复用这些已有名称，禁止用同义词或缩写替代）】\n" + geoPaths.join("\n");
+
+                var itemNames = [];
+                var mems = worlds[wid].memories || [];
+                for (var mi = 0; mi < mems.length; mi++) {
+                    if (mems[mi].items) {
+                        for (var ii = 0; ii < mems[mi].items.length; ii++) {
+                            var iname = mems[mi].items[ii].name;
+                            if (iname && itemNames.indexOf(iname) === -1) itemNames.push(iname);
+                        }
+                    }
+                }
+                if (itemNames.length) itemHint = "\n\n【已记录物品（items.name 必须复用这些已有名称）】\n" + itemNames.join("、");
+            }
+        } catch(e) {}
+        context = context + geoHint + itemHint;
 
         var prompt = digestPrompt
             .replace(/\{\{turn_time_hint\}\}/g, turnTimeHint)
