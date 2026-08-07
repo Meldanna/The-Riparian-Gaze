@@ -238,8 +238,12 @@
     }
     function findNode(id) { return state.nodes.find(function (n) { return n.id === id; }) || null; }
     function getPathToRoot(nodeId) {
-        var path = [], cur = findNode(nodeId);
-        while (cur) { path.unshift(cur.id); cur = findNode(cur.parentId); }
+        var path = [], visited = {}, cur = findNode(nodeId);
+        while (cur && !visited[cur.id]) {
+            visited[cur.id] = true;
+            path.unshift(cur.id);
+            cur = findNode(cur.parentId);
+        }
         return path;
     }
 
@@ -1010,8 +1014,9 @@
 
     // 浓缩核心：把 indices 对应的总结发给API浓缩，回调返回结果文本
     function compressSummaries(indices, callback) {
-        var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim(), model = (globalApi.model || "").trim();
         if (!apiUrl) { toast("请先配置API地址"); return; }
+        var capturedNodeId = state.currentNodeId;
+        if (!capturedNodeId) console.warn("[浓缩] nodeId 为空，请检查触发时机");
         var texts = indices.map(function(i){ return state.summaries[i].text; }).join("\n\n---\n\n");
         var prompt = (globalApi.compressPrompt || "").replace("{{context}}", texts);
         toast("⧗ 浓缩中…");
@@ -1020,7 +1025,7 @@
             body: JSON.stringify({ model: model || undefined, messages: [{ role: "user", content: prompt }], max_tokens: 1024 })
         }).then(function(r){ return r.json(); }).then(function(data){
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-            callback([{ timestamp: Date.now(), text: text, nodeId: state.currentNodeId, compressed: true, sourceCount: indices.length }]);
+            callback([{ timestamp: Date.now(), text: text, nodeId: capturedNodeId, compressed: true, sourceCount: indices.length }]);
         }).catch(function(e){ toast("浓缩失败：" + e.message); });
     }
 
@@ -1047,8 +1052,11 @@
         // 取最旧的未浓缩条目
         var batchSize = Math.max(2, globalApi.compressBatchSize || 10);
         var indices = [];
+        var path = getPathToRoot(state.currentNodeId);
         for (var i = 0; i < state.summaries.length && indices.length < batchSize; i++) {
-            if (!state.summaries[i].compressed) indices.push(i);
+            if (!state.summaries[i].compressed && (!state.summaries[i].nodeId || path.indexOf(state.summaries[i].nodeId) !== -1)) {
+                indices.push(i);
+            }
         }
         if (indices.length < 2) {
             toast("⚠ 档案库已满（" + state.summaries.length + " 条），已无可浓缩的未浓缩条目，请手动清理");
@@ -1210,6 +1218,8 @@
     function _doSummaryRequest(messagesArray, auto, sourceLabel, onDone) {
         var apiUrl = (globalApi.apiUrl || "").trim(), apiKey = (globalApi.apiKey || "").trim();
         var model = (globalApi.model || "").trim(), summaryPrompt = (globalApi.summaryPrompt || "").trim();
+        var capturedNodeId = state.currentNodeId;
+        if (!capturedNodeId) console.warn("[总结] nodeId 为空，请检查触发时机");
         if (!apiUrl) { toast("切片失败：未设置 API 地址"); if (typeof onDone === "function") onDone(); return; }
         if (!messagesArray || !messagesArray.length) { if (!auto) toast("没有可用的消息"); if (typeof onDone === "function") onDone(); return; }
 
@@ -1239,7 +1249,7 @@
             var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
             if (lockedWorldId && worlds[lockedWorldId]) {
                 if (!worlds[lockedWorldId].summaries) worlds[lockedWorldId].summaries = [];
-                worlds[lockedWorldId].summaries.push({ timestamp: Date.now(), text: text, nodeId: state.currentNodeId, floorFrom: firstFloor, floorTo: lastFloor });
+                worlds[lockedWorldId].summaries.push({ timestamp: Date.now(), text: text, nodeId: capturedNodeId, floorFrom: firstFloor, floorTo: lastFloor });
                 if (auto && firstFloor >= 0 && lastFloor >= 0) {
                     state.lastAutoSummaryRange = { floorFrom: firstFloor, floorTo: lastFloor, summaryIdx: worlds[lockedWorldId].summaries.length - 1 };
                 }
