@@ -2494,10 +2494,19 @@ function showEditGeoModal(fullPath) {
         tlgBtn("tlg-geo-edit-cancel", "取消") +
         tlgBtn("tlg-geo-edit-save", "保存", "primary")
     ) +
-
     '</div>';
     document.body.appendChild(bd);
-
+    bd.querySelector("#tlg-geo-edit-merge").onclick = function() {
+        var allPaths = getAllGeoPaths().filter(function(p) { return p !== fullPath && p.indexOf(fullPath + "/") !== 0; });
+        if (!allPaths.length) { toast("没有可合并的目标地点"); return; }
+        var sel = prompt("输入目标地点完整路径（当前地点将被删除并入目标）：\n\n" + allPaths.join("\n"));
+        if (!sel || !sel.trim()) return;
+        if (allPaths.indexOf(sel.trim()) === -1) { toast("路径不存在"); return; }
+        if (!confirm("将「" + fullPath + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
+        var ok = mergeGeoNodes(currentWorldId, fullPath.split("/"), sel.trim().split("/"));
+        if (ok) { bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已合并"); }
+        else toast("合并失败");
+    };
     bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-edit-save").onclick = function() {
         var newName = bd.querySelector("#tlg-geo-edit-name").value.trim();
@@ -2840,12 +2849,28 @@ function showNpcDetailModal(name) {
             '<input type="text" class="tlg-input" id="tlg-npc-evt-time" placeholder="时间" style="width:70px;flex:0 0 70px;margin-bottom:0;" />' +
             tlgBtn("tlg-npc-evt-add", "+", "primary", "width:32px;flex:0 0 32px;padding:5px 0;") +
             '</div>') +
-        tlgActionsRow(tlgBtn("tlg-npc-close", "关闭") + tlgBtn("tlg-npc-save", "保存", "primary")) +
+        tlgActionsRow(
+            tlgBtn("tlg-npc-merge", "合并到…", "", "margin-right:auto;") +
+            tlgBtn("tlg-npc-close", "关闭") +
+            tlgBtn("tlg-npc-save", "保存", "primary")
+        ) +
         '</div>';
     document.body.appendChild(bd);
 
     renderNpcTimelineList(document.getElementById("tlg-npc-timeline-list"), npc);
-
+    
+    bd.querySelector("#tlg-npc-merge").onclick = function() {
+        var archive = getNpcArchive();
+        var others = Object.keys(archive).filter(function(n) { return n !== name; });
+        if (!others.length) { toast("没有可合并的目标角色"); return; }
+        var sel = prompt("输入目标角色名（当前角色时间线将并入目标，当前角色档案删除）：\n\n" + others.join("、"));
+        if (!sel || !sel.trim()) return;
+        if (!archive[sel.trim()]) { toast("角色不存在"); return; }
+        if (!confirm("将「" + name + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
+        var ok = mergeNpcEntries(currentWorldId, name, sel.trim());
+        if (ok) { bd.remove(); refreshNpcList(); toast("角色已合并"); }
+        else toast("合并失败");
+    };
     bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-save").onclick = function() {
         npc.role = bd.querySelector("#tlg-npc-role").value.trim();
@@ -2915,6 +2940,106 @@ function renderNpcTimelineList(container, npc) {
             renderNpcTimelineList(container, npc);
         };
     });
+}
+function showPendingReviewModal() {
+    if (!currentWorldId || !worlds[currentWorldId]) { toast("请先关联世界"); return; }
+    var world = worlds[currentWorldId];
+    var pending = world.pendingReview || { npc: [], item: [] };
+    var npcList = pending.npc || [];
+    var itemList = pending.item || [];
+
+    function renderPendingHtml() {
+        var npcHtml = npcList.length ? npcList.map(function(entry, i) {
+            return '<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:8px;margin-bottom:6px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+                '<div style="flex:1;">' +
+                '<div style="font-size:12px;font-weight:600;">' + escHtml(entry.name) + (entry.role ? ' <span style="font-weight:400;color:rgba(255,255,255,0.5);">(' + escHtml(entry.role) + ')</span>' : '') + '</div>' +
+                (entry.state_delta ? '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:3px;">' + escHtml(entry.state_delta) + '</div>' : '') +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:3px;">' + escHtml(entry.timestamp || "") + ' · 回合' + (entry.turn || 0) + ' · ' + (entry.certain ? '基本确定' : '不确定') + '</div>' +
+                '</div>' +
+                '<div style="display:flex;flex-direction:column;gap:4px;">' +
+                '<button type="button" class="tlg-btn tlg-pending-npc-approve" data-idx="' + i + '" style="padding:2px 8px;font-size:10px;width:auto;height:auto;writing-mode:horizontal-tb;">归档</button>' +
+                '<button type="button" class="tlg-btn tlg-pending-npc-discard" data-idx="' + i + '" style="padding:2px 8px;font-size:10px;width:auto;height:auto;writing-mode:horizontal-tb;">丢弃</button>' +
+                '</div></div></div>';
+        }).join("") : '<div style="color:rgba(255,255,255,0.35);font-size:11px;padding:8px 0;">暂无待审人物</div>';
+
+        var itemHtml = itemList.length ? itemList.map(function(entry, i) {
+            return '<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:8px;margin-bottom:6px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+                '<div style="flex:1;">' +
+                '<div style="font-size:12px;font-weight:600;">' + escHtml(entry.name) + '</div>' +
+                (entry.change ? '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:3px;">' + escHtml(entry.change) + (entry.owner ? ' · ' + escHtml(entry.owner) : '') + '</div>' : '') +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:3px;">' + escHtml(entry.timestamp || "") + ' · 回合' + (entry.turn || 0) + ' · ' + (entry.certain ? '基本确定' : '不确定') + '</div>' +
+                '</div>' +
+                '<div style="display:flex;flex-direction:column;gap:4px;">' +
+                '<button type="button" class="tlg-btn tlg-pending-item-approve" data-idx="' + i + '" style="padding:2px 8px;font-size:10px;width:auto;height:auto;writing-mode:horizontal-tb;">归档</button>' +
+                '<button type="button" class="tlg-btn tlg-pending-item-discard" data-idx="' + i + '" style="padding:2px 8px;font-size:10px;width:auto;height:auto;writing-mode:horizontal-tb;">丢弃</button>' +
+                '</div></div></div>';
+        }).join("") : '<div style="color:rgba(255,255,255,0.35);font-size:11px;padding:8px 0;">暂无待审物品</div>';
+
+        return npcHtml + '<div style="border-top:1px solid rgba(255,255,255,0.08);margin:12px 0;"></div>' + itemHtml;
+    }
+
+    var bd = tlgModalBackdrop("tlg-pending-modal");
+    bd.innerHTML = '<div class="tlg-modal" style="max-height:80vh;overflow-y:auto;">' +
+        '<div class="tlg-modal-title">待选库（' + (npcList.length + itemList.length) + ' 条待审）</div>' +
+        '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:12px;">certain=false 的条目在此等待人工确认后归档，或直接丢弃</div>' +
+        '<div id="tlg-pending-list">' + renderPendingHtml() + '</div>' +
+        tlgActionsRow(tlgBtn("tlg-pending-close", "关闭")) +
+        '</div>';
+    document.body.appendChild(bd);
+
+    function rebind() {
+        var list = bd.querySelector("#tlg-pending-list");
+        list.innerHTML = renderPendingHtml();
+        bd.querySelector(".tlg-modal-title").textContent = "待选库（" + (npcList.length + itemList.length) + " 条待审）";
+
+        list.querySelectorAll(".tlg-pending-npc-approve").forEach(function(btn) {
+            btn.onclick = function() {
+                var idx = parseInt(btn.dataset.idx, 10);
+                var entry = npcList[idx]; if (!entry) return;
+                var archive = getNpcArchive();
+                if (!archive[entry.name]) {
+                    archive[entry.name] = { role: entry.role || "", tier: "normal", order: Date.now(), hidden: false, lastActiveTurn: state.turnCounter || 0, appearance: { value: "", locked: false }, age: { value: "", locked: false }, timeline: [], custom: [] };
+                }
+                if (entry.state_delta) {
+                    archive[entry.name].timeline.push({ event: entry.state_delta, timestamp: entry.timestamp || "", auto: true, createdAt: Date.now() });
+                }
+                npcList.splice(idx, 1);
+                saveWorlds(); rebind(); refreshNpcList(); toast("已归档：" + entry.name);
+            };
+        });
+        list.querySelectorAll(".tlg-pending-npc-discard").forEach(function(btn) {
+            btn.onclick = function() {
+                var idx = parseInt(btn.dataset.idx, 10);
+                var name = npcList[idx] && npcList[idx].name;
+                npcList.splice(idx, 1);
+                saveWorlds(); rebind(); toast("已丢弃：" + name);
+            };
+        });
+        list.querySelectorAll(".tlg-pending-item-approve").forEach(function(btn) {
+            btn.onclick = function() {
+                var idx = parseInt(btn.dataset.idx, 10);
+                var entry = itemList[idx]; if (!entry) return;
+                var iArchive = worlds[currentWorldId].itemArchive || (worlds[currentWorldId].itemArchive = {});
+                if (!iArchive[entry.name]) iArchive[entry.name] = { hidden: false, lastActiveTurn: 0, history: [] };
+                if (entry.change) iArchive[entry.name].history.push({ change: entry.change, owner: entry.owner || null, state: entry.state || null, timestamp: entry.timestamp || "" });
+                iArchive[entry.name].lastActiveTurn = state.turnCounter || 0;
+                itemList.splice(idx, 1);
+                saveWorlds(); rebind(); toast("已归档：" + entry.name);
+            };
+        });
+        list.querySelectorAll(".tlg-pending-item-discard").forEach(function(btn) {
+            btn.onclick = function() {
+                var idx = parseInt(btn.dataset.idx, 10);
+                var name = itemList[idx] && itemList[idx].name;
+                itemList.splice(idx, 1);
+                saveWorlds(); rebind(); toast("已丢弃：" + name);
+            };
+        });
+    }
+    rebind();
+    bd.querySelector("#tlg-pending-close").onclick = function() { bd.remove(); };
 }
 
 function showAddNpcModal() {
@@ -3108,11 +3233,24 @@ function showEditItemModal(itemName, itemData) {
         '<div style="max-height:150px;overflow-y:auto;margin-bottom:10px;">' + historyHtml + '</div>' +
         tlgActionsRow(
             tlgBtn("tlg-item-del", "删除", "danger", "margin-right:auto;") +
+            tlgBtn("tlg-item-merge", "合并到…") +
             tlgBtn("tlg-item-close", "关闭") +
             tlgBtn("tlg-item-save", "保存", "primary")
         ) +
         '</div>';
     document.body.appendChild(bd);
+    bd.querySelector("#tlg-item-merge").onclick = function() {
+        var archive = (currentWorldId && worlds[currentWorldId] && worlds[currentWorldId].itemArchive) || {};
+        var others = Object.keys(archive).filter(function(n) { return n !== itemName; });
+        if (!others.length) { toast("没有可合并的目标物品"); return; }
+        var sel = prompt("输入目标物品名（当前物品历史将并入目标，当前物品档案删除）：\n\n" + others.join("、"));
+        if (!sel || !sel.trim()) return;
+        if (!archive[sel.trim()]) { toast("物品不存在"); return; }
+        if (!confirm("将「" + itemName + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
+        var ok = mergeItemEntries(currentWorldId, itemName, sel.trim());
+        if (ok) { bd.remove(); refreshItemsList(); toast("物品已合并"); }
+        else toast("合并失败");
+    };
     bd.querySelector("#tlg-item-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-item-save").onclick = function() {
         if (!w) { bd.remove(); return; }
@@ -3248,6 +3386,7 @@ function showEditItemModal(itemName, itemData) {
                 (!isLinked && !isCurrent ? '<button type="button" class="tlg-btn tlg-worlds-link" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">连接当前世界</button>' : "") +
                 '<button type="button" class="tlg-btn tlg-worlds-rename" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">重命名</button>' +
                 '<button type="button" class="tlg-btn tlg-worlds-export" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">提取源数据</button>' +
+                '<button type="button" class="tlg-btn tlg-btn-danger tlg-worlds-clear-summaries" data-wid="' + wid + '" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">清空摘要</button>' +
                 '</div></div>';
         }).join("");
         container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; saveCurrentWorld(); currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.memories = w.memories || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; saveWorlds(); toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
@@ -3255,6 +3394,21 @@ function showEditItemModal(itemName, itemData) {
         container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖"); }); });
         container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
         container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩"); }); });
+        container.querySelectorAll(".tlg-worlds-clear-summaries").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                var wid = btn.dataset.wid;
+                var w = worlds[wid];
+                if (!w) return;
+                var count = (w.summaries || []).length;
+                if (!count) { toast("该世界没有摘要记录"); return; }
+                if (!confirm("确认清空「" + w.name + "」的全部 " + count + " 条摘要？此操作不可撤销。")) return;
+                w.summaries = [];
+                if (wid === currentWorldId) state.summaries = [];
+                saveWorlds();
+                refreshWorlds();
+                toast("已清空 " + count + " 条摘要");
+            });
+        });
     }
 
     function importWorld() {
@@ -3352,6 +3506,7 @@ function showEditItemModal(itemName, itemData) {
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
             '<select id="tlg-npc-filter" class="tlg-select" style="width:auto;flex:none;margin-bottom:0;"><option value="all">全部</option><option value="core">核心</option><option value="important">重要</option><option value="normal">普通</option></select>' +
             '<button type="button" class="tlg-btn" id="tlg-npc-add">+ 新建</button>' +
+            '<button type="button" class="tlg-btn" id="tlg-pending-btn">待选库</button>' +
             '</div>' +
             '<div id="tlg-npc-list"></div>' +
             '</div>' +
