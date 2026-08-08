@@ -2654,14 +2654,14 @@ function refreshNpcList() {
         normal: ""
     };
 
-    container.innerHTML = filtered.map(function(name) {
+        container.innerHTML = filtered.map(function(name) {
         var npc = archive[name];
         var tier = npc.tier || "normal";
         var dotSize = TIER_DOT[tier] + "px";
         var dotGlow = TIER_GLOW[tier];
         var timelineCount = (npc.timeline || []).length;
         var mvuBars = "";
-                if (mvuData && mvuData[name]) {
+        if (mvuData && mvuData[name]) {
             var md = mvuData[name];
             var BAR_COLORS = {
                 "生命": "rgba(80,180,160,0.5),rgba(150,230,210,0.8)",
@@ -2675,12 +2675,11 @@ function refreshNpcList() {
                 "暧昧值": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)",
                 "暧昧": "rgba(200,100,150,0.4),rgba(245,150,200,0.75)"
             };
-
             function getBarColor(key) {
                 var lower = key.toLowerCase();
                 var keys = Object.keys(BAR_COLORS);
-                for (var bi = 0; bi < keys.length; bi++) { 
-                    if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]]; 
+                for (var bi = 0; bi < keys.length; bi++) {
+                    if (lower.indexOf(keys[bi].toLowerCase()) !== -1 || keys[bi].toLowerCase().indexOf(lower) !== -1) return BAR_COLORS[keys[bi]];
                 }
                 return "rgba(100,100,100,0.4),rgba(160,160,160,0.7)";
             }
