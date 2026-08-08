@@ -1791,9 +1791,10 @@ if (!cur[name].locked && location.desc) {
                     }
                 }
                 if (itemNames.length) itemHint = "\n\n【已记录物品（items.name 必须复用这些已有名称）】\n" + itemNames.join("、");
-            }
+
                 var npcNames = worlds[wid].npcArchive ? Object.keys(worlds[wid].npcArchive) : [];
                 if (npcNames.length) itemHint += "\n\n【已记录角色（characters.name 必须复用这些已有名称，禁止用身份/称号代替）】\n" + npcNames.join("、");
+            }
         } catch(e) {}
         context = context + geoHint + itemHint;
 
