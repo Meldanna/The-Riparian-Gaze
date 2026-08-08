@@ -2707,6 +2707,7 @@ function refreshNpcList() {
                         '<div style="position:absolute;top:0;left:0;width:100%;height:100%;text-align:center;font-size:9px;color:#fff;line-height:14px;font-weight:bold;text-shadow:0 0 2px #000;">' + val + '</div>' +
                         '</div></div>';
                 }
+            }
 
         return '<div class="tlg-archive-card" draggable="true" data-npc-name="' + escHtml(name) + '">' +
             '<div style="display:flex;align-items:center;gap:8px;">' +
