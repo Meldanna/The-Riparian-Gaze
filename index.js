@@ -1821,8 +1821,6 @@
 
         var hints = buildDigestContextHints(getLinkedWorldId() || currentWorldId);
         context = context + hints.geoHint + hints.npcHint + hints.itemHint;
-        } catch(e) {}
-        context = context + geoHint + itemHint;
 
         var prompt = digestPrompt
             .replace(/\{\{turn_time_hint\}\}/g, turnTimeHint)
