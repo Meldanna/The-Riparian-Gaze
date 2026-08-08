@@ -1598,7 +1598,7 @@ if (!cur[name].locked && location.desc) {
             var standardName = findExactNpc(Object.keys(archive), rawName) || rawName;
 
             // certain===false 或无 state_delta → 进待审队列，不直接归档
-            if (ch.certain === false || !ch.state_delta || ch.state_delta === "null") {
+                if (ch.certain === false) {
                 pending.npc.push({ name: rawName, role: ch.role || "", state_delta: ch.state_delta || null,
                     certain: ch.certain !== false, timestamp: turnTime || "", turn: state.turnCounter || 0 });
                 return;
@@ -1639,7 +1639,7 @@ if (!cur[name].locked && location.desc) {
 
         items.forEach(function(it) {
             if (!it.name) return;
-            if (it.certain === false || !it.change) {
+                if (it.certain === false) {
                 pending.item.push({ name: it.name.trim(), change: it.change || null, owner: it.owner || null,
                     state: it.state || null, certain: it.certain !== false, timestamp: turnTime || "", turn: state.turnCounter || 0 });
                 return;
@@ -1648,6 +1648,23 @@ if (!cur[name].locked && location.desc) {
             if (!archive[standardName]) archive[standardName] = { hidden: false, lastActiveTurn: 0, history: [] };
             archive[standardName].history.push({ change: it.change, owner: it.owner || null, state: it.state || null, timestamp: turnTime || "" });
             archive[standardName].lastActiveTurn = state.turnCounter || 0;
+                            // 存储 aliases（别称）供人工合并参考
+            if (ch.aliases && ch.aliases.length) {
+                if (!archive[standardName].aliases) archive[standardName].aliases = [];
+                ch.aliases.forEach(function(a) {
+                    if (a && archive[standardName].aliases.indexOf(a) === -1) archive[standardName].aliases.push(a);
+                });
+            }
+            // 存储年龄（首次明确或变化时）
+            if (ch.age && ch.age !== "null") {
+                archive[standardName].age = { value: ch.age, locked: false };
+            }
+            if (it.aliases && it.aliases.length) {
+                if (!archive[standardName].aliases) archive[standardName].aliases = [];
+                it.aliases.forEach(function(a) {
+                    if (a && archive[standardName].aliases.indexOf(a) === -1) archive[standardName].aliases.push(a);
+                });
+            }
         });
         saveWorlds();
     }
