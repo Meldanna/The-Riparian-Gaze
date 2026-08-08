@@ -28,7 +28,7 @@
         vectorTopK: 8, rerankTopN: 3, vectorThreshold: 0, rerankThreshold: 0,
         vectorQueryWindow: 5, vectorChunkLen: 600, vectorInjectDepth: 0, vectorMaxChars: 4000,
         digestUrl: "", digestKey: "", digestModel: "", digestModelList: [],
-        digestPrompt: "你是因果观测仪。分析以下对话，输出JSON对象，不要任何额外文字。\n\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则null\",\n  \"location\": { \"path\": [\"一级地名\",\"二级地名\"], \"desc\": \"简介\", \"is_current\": true, \"moved_from\": null },\n  \"characters\": [{ \"name\": \"标准名\", \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true }],\n  \"items\": [{ \"name\": \"物品全称\", \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\" }],\n  \"key_events\": [\"关键词1\",\"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"（时间、地点、人物、事件各自散落）\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联，不要让读者自行推断因果。\n5. 关系变化和情绪转折要写明触发原因：\"因为苏晚出手相救且未趁机夺取怀表，林夜对她从戒备转为初步信任。\"\n6. 地点移动要写\"从A前往B\"，不要只写目的地。\n7. 物品状态变化要写\"某物从A状态变为B状态\"，不要只写最终状态。\n8. 保留重要对话的核心语义（不逐字引用，但保留信息量），如威胁、承诺、揭示秘密等。\n\n【其他字段规则】\n- turn_time：本轮剧情时间（如\"入夜后\"\"第三天清晨\"\"子时三刻\"）。回合开头通常有时间标记，正文可能有\"上午\"\"下午\"等相对时间。原文完全无时间信息则null。\n- location.path：当前所在地层级数组，如[\"青州\",\"云隐镇\",\"朝露客栈\",\"二楼天字房\"]。越具体越好。如果上下文提供了\"已记录地理路径\"列表，必须从中选择与当前实际地点匹配的现有路径原样复用，禁止即使含义相同也换一种描述方式（例如已有\"教学楼/三楼\"时，不要再输出\"三楼走廊尽头\"或\"三楼\"这类变体，必须使用已记录的那个路径）。只有确定是全新地点、且已记录列表中确实没有可匹配项时，才创建新路径。必须使用该地点在文中最常出现的标准名称，同一地点禁止使用不同名称（如\"北京\"和\"京城\"必须统一为一个；\"皇宫\"和\"宫城\"必须统一为一个）。如果一个地点有多个称呼，选择出现频率最高的那个作为唯一标准名。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：如果本轮发生了位置移动，填出发地path数组，否则null。\n- location.desc：该地点的简介（首次出现时写，已知地点可不写）。\n- characters：只列本轮有实质互动或状态变化的角色。name必须用该角色最广为人知的专有名称（人名/称号），禁止使用泛称身份（如\"祭司\"\"商人\"\"守卫\"）、人称代词（如\"你\"\"我\"\"她\"）或叙事视角词（如\"主角\"\"玩家\"）作为name；如果某角色在原文中只以身份出现、专有名字尚未揭露，则跳过该角色，不要为其单独建档。同一角色在文中多次以不同方式提及（身份/外号/全名）时，必须统一使用其最终揭露的专有名字。role填身份标签。state_delta用一句完整的叙事句描述该角色在本轮的关键经历，格式为\"在[地点][做了什么/发生了什么]，[结果/状态变化]\"。示例：\"在朝露客栈与持刀男子搏斗，右臂被刺伤，从冷静转为警觉\"。若角色本轮无实质变化则null。禁止只写数值变动（如\"法力-10\"），必须写成叙事：\"施法协助克劳斯突破封印，法力从106消耗至96\"。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：提取3-8个关键词/短语，供关键词检索。必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔、悬念、被打断的事件。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出null或空数组。\n- 禁止输出markdown，直接输出JSON。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",        queryRefinePrompt: "你是\"向量索引构造仪\"，任务是从当前对话语境中提取所有具有检索价值的信息，供向量数据库检索历史事实单元使用。你不做判断、不做评分、不做解释，只做提炼。\n\n【提炼规则——每一类都穷尽提取，不限数量，有多少提多少】\n\n1. 时间信息：当前语境中所有时间相关表述。包括绝对时间（\"子时\"\"第三天黎明\"）和相对时间（\"上午\"\"入夜后\"\"三天前\"）。每个单独列出。没有则该行不输出。\n\n2. 地理坐标：当前所处的具体位置，以及对话中提及的所有其他地点。每个地点用\"/\"分隔层级。没有则该行不输出。\n\n3. 物品全称：当前对话中被提及、被使用、被观察、被寻找、被讨论的所有物品。必须用其在文中出现的全称，不要简化或改写。没有则该行不输出。\n\n4. 角色姓名：当前正在互动的、被提及的、被讨论的、即将登场暗示的所有角色。只写姓名本体。没有则该行不输出。\n\n5. 状态关键词：当前语境中涉及的所有角色状态、物品状态、关系状态（如\"骨折\"\"中毒\"\"敌对\"\"损毁\"\"丢失\"\"信任\"\"恢复\"）。直接对应事实单元的[E][I][C]字段。没有则该行不输出。\n\n6. 事件关键词：当前情节中正在发生、刚刚发生、或被回忆讨论的事件核心词（如\"失窃\"\"暗杀\"\"交易\"\"逃离\"\"封印破碎\"\"追踪\"\"审讯\"）。直接对应事实单元的[A][C]字段。没有则该行不输出。\n\n【质量规则】\n- 每个关键词必须是名词或名词短语，禁止动词短语、禁止完整句子。\n- 禁止输出同义重复项——只保留信息量更大的那个。\n- 禁止输出通用词（\"房间\"\"东西\"\"有人\"\"事情\"这类无检索价值的词）。\n- 禁止编造原文中不存在的词。\n\n【输出格式（唯一允许的格式，空类不输出该行）】\n[TIME]: <逗号分隔>\n[PLACE]: <逗号分隔>\n[ITEM]: <逗号分隔>\n[CHAR]: <逗号分隔>\n[STATE]: <逗号分隔>\n[EVENT]: <逗号分隔>\n\n现在基于以下最新对话内容提取：\n{{context}}",
+        digestPrompt: "你是因果观测仪。你的任务是阅读这一轮对话，把发生的事情整理成一份 JSON 档案，直接输出 JSON 对象，不要任何额外文字，不要输出 markdown。\n\n【输出格式】\n{\n  \"narrative\": \"（必填）本轮发生事件的完整自然语言叙述。\",\n  \"turn_time\": \"本轮剧情内时间，原文无则 null\",\n  \"location\": {\n    \"path\": [\"一级地名\", \"二级地名\", \"三级地名\", \"四级地名\"],\n    \"desc\": \"简介，只在新地点或有新信息时写，否则 null\",\n    \"is_current\": true,\n    \"moved_from\": null\n  },\n  \"characters\": [\n    { \"name\": \"该角色目前已知的最完整专有名字\", \"aliases\": [\"本轮出现的其他称呼\"], \"role\": \"身份\", \"state_delta\": \"变化\", \"present\": true, \"certain\": true, \"age\": \"年龄(首次明确或变化才填)\" }\n  ],\n  \"items\": [\n    { \"name\": \"物品标准名\", \"aliases\": [\"本轮出现的其他说法\"], \"change\": \"变动类型\", \"owner\": \"持有者\", \"state\": \"状态\", \"certain\": true }\n  ],\n  \"key_events\": [\"关键词1\", \"关键词2\"],\n  \"unresolved\": [\"悬置线索1\"],\n  \"importance\": 7\n}\n\n────────────────────────────────\n【narrative 字段写作规则——这是唯一会被向量化的字段，决定检索质量】\n\n1. 不限字数。信息量大就写多，日常寒暄可以短。穷尽记录，不省略。\n2. 每个事件必须写成完整的\"时间+地点+人物+动作+结果\"绑定句，禁止让任何要素脱节。\n   正确：\"入夜后，林夜在朝露客栈二楼天字房被持刀男子拦截索要青铜怀表，拒绝后右臂被刺伤。\"\n   错误：\"有人索要怀表。林夜受伤了。在客栈里。入夜后。\"\n3. 角色首次出现时必须带身份标注（如\"苏晚（术士）\"），后续同一段内可只用名字。\n4. 因果关系用\"因此/导致/随后\"等连接词显式串联。\n5. 关系变化和情绪转折要写明触发原因。\n6. 地点移动要写\"从A前往B\"。\n7. 物品状态变化要写\"某物从A状态变为B状态\"。\n8. 保留重要对话的核心语义。\n9. 禁止在 narrative 里使用依赖叙述时点的浮动时间词（\"今天\"\"昨天\"\"明天\"\"当晚\"\"次日\"\"第二天\"等）。如果原文用了这些词，必须根据上下文提供的故事内时间换算成固定时间后再写入。例如：\"她说明天再来\"→写成\"她约定于[具体时间]再来\"。若时间锚点不足以换算，只保留先后关系并注明\"具体时间未确定\"，不要猜造日期。\n\n────────────────────────────────\n【地点规则——手把手教你怎么对照地图，像在翻地图册一样一页一页翻】\n\n上下文会给你一份\"已记录地点\"，它是一棵树形 JSON，例如：\n\n{\n  \"甲国\": {\n    \"desc\": \"大陆东部王国\",\n    \"children\": {\n      \"乙省\": {\n        \"children\": {\n          \"云城\": { \"children\": { \"首都路\": {} } },\n          \"雾城\": { \"children\": { \"首都路\": {} } }\n        }\n      },\n      \"丁省\": {\n        \"children\": {\n          \"山城\": { \"children\": { \"首都路\": {} } }\n        }\n      }\n    }\n  },\n  \"乙国\": {\n    \"children\": {\n      \"乙省\": { \"children\": {} }\n    }\n  }\n}\n\n注意这棵树里有两个\"乙省\"——一个在\"甲国\"下，一个在\"乙国\"下。它们是完全不同的地方，因为它们各自的上级（父节点）不同。同样，\"乙省/云城\"下的\"首都路\"和\"乙省/雾城\"下的\"首都路\"也是两条完全不同的街道，它们只是碰巧同名，绝对不是同一条路。这就像甲国有11个省，每个省都有一座\"首都\"——它们不是同一座城市，只是每个省各自的省会恰好都叫首都而已。\n\n请按下面的步骤操作，每一步都要做，一步都不能跳过，也不能倒序：\n\n第一步：确定当前地点在树里的「起点」——从树的最外层（第一层）开始找。\n  - 翻开树的最外层，把所有顶级地名列出来，比如上面例子里是「甲国」和「乙国」。\n  - 把本轮对话里提到的最宏观地名（比如国家、大区、星球）和这个列表一一对照。\n  - 如果找到了匹配，就进入那个节点的 children，进行第二步。\n  - 如果最外层里完全没有能匹配的，说明这是一个新的顶级地点，直接新建，写你在原文里读到的名字。不要把它硬塞到某个已有的国家/大区下面——没有上级就没有上级，顶级节点允许新建。\n\n第二步：在刚才进入的 children 里，找下一级地名。\n  - 只在这一层的兄弟节点里找，不要跨层、不要跨分支。\n  - 「兄弟节点」的意思是：同一个父节点 children 下的所有直接子节点，别的分支下的节点不算兄弟，哪怕名字一样。\n  - 如果这一层找到了匹配，进入它的 children，继续下一步；如果找不到，新建，写原文名字。\n\n第三步、第四步……以此类推，一层层往下，直到把本轮地点的所有层级都处理完。\n\n关于层级深度：地点的层级要尽可能写全，不要偷懒只写最后一层。一个完整的地址可能有五六层，比如「甲国 / 乙省 / 云城 / 北区 / 朝露街 / 3号客栈」，每一层都要写进 path 数组，不要省略中间的层级。如果本轮只能确定到某一层（比如只知道在\"乙省\"，不知道具体哪个城市），那就写到那一层，不要捏造更细的层级。\n\n关于「找到了」的判断标准：两个地名只要满足以下任意一条，就认为是同一个地方：\n  - 完全一样（去掉空格后）\n  - 一个是另一个去掉常见地理后缀（城/镇/村/国/区/路/楼/山/岛等）后的结果，而且去掉后的核心词长度不少于原来的一半（防止太短的词乱匹配）\n  - 注意：只在当前这一层的兄弟节点里用这个标准判断，找到了才算找到，其他分支里的同名节点不算。\n\n关于更新描述：如果某地点的 desc 需要更新（发生了实质变化，或在此地发生了值得记入档案的关键事件），更新时必须写出累积后的完整描述——保留原有要点，再把新信息并入。例如：某地原描述是\"男女主初遇的地方\"，后来又在此分手，更新时要写\"男女主初遇、也是后来分手的地方\"，而不是只写\"分手的地方\"（这样会丢失初遇的信息）。\n\n────────────────────────────────\n【人物规则——先认人，再认称呼，最后才判断这条信息该挂在谁头上】\n\n上下文会给你两样东西：\n  A. \"已建档角色\"列表：这个世界里目前已经有档案的角色，格式是「名字（身份）」，比如「陈明（高中语文教师）、林小满（学生）」。\n  B. \"本轮可能在场角色\"列表：根据最近几回合出现过的角色筛选出来的名单，同样是「名字（身份）」格式。这只是参考范围，不是保证名单里的人这轮一定出现。\n\n第一步：先建立「本轮角色底稿」。\n读完整段对话，把你能确认专有名字的角色列出来，每人一条。判断方法：\n  - 原文直接叫了这个名字（比如\"陈明说……\"）→ 直接用，certain=true。\n  - 原文只用了称呼/身份（比如\"老师说……\"）→ 暂时不填 name，先记下这个称呼和对应的上下文，等第二步处理。\n\n第二步：处理称呼消歧。\n对于第一步里每一个「只知道称呼、不知道名字」的角色，按下面的决策树操作：\n\n  情况 A：「老师」这个称呼——去 B 名单里找身份包含「教师/老师」的人。\n    - B 名单里只有陈明（高中语文教师）符合 → name=陈明，certain=true。\n    - B 名单里同时有陈明（高中语文教师）和王芳（体育教师）符合，而这段原文没有更多信息分清是谁 → name 填你觉得更可能的那个，certain=false，state_delta=null。宁可记成「不确定」，也不要把事情安在错的人头上——记错了以后没法自动改。\n    - B 名单里完全没有符合的 → 这可能是新角色，但目前只知道称呼不知道名字，跳过这条，不要把「老师」当名字建档。\n\n  情况 B：「哥哥」这个称呼——同样查 B 名单里是否有角色的身份/关系标注里有「兄/哥哥」字样。\n    - 如果陈明的档案里有「林小满的哥哥」这类信息，且 B 名单里没有其他可能的哥哥 → name=陈明，certain=true。\n    - 找不到 → certain=false，或者跳过。\n\n  情况 C：同一段里「A」「A老师」「哥哥」都出现了，而且根据上下文（比如林小满叫了一声「哥哥」然后陈明回头了），可以确认这三个称呼指的是同一个人 → 这三个称呼只建一条记录，name 用「陈明」，aliases 填 [\"A老师\", \"哥哥\"]。\n\n  情况 D：「B老师」出现了，而 B 名单里只有陈明是老师，没有姓 B 的老师 → 这是新角色，name 先写「B老师」（因为目前只知道这个称呼），certain=true（称呼本身是确定的，不确定的是背后有没有完整名字）。等后续原文揭露了全名，再合并。\n\n第三步：与「已建档角色」对照，决定是新建还是更新。\n  - 如果 name 在已建档列表里能精确匹配到 → 更新这个人的档案，写 state_delta。\n  - 如果 name 在已建档列表里找不到 → 新建档案。\n  - 不做模糊合并：「陈明」和「陈老师」不会被代码自动合并，你在 aliases 里把它们都列出来，由人工合并工具处理，比代码猜错更安全。\n\n关于年龄字段（age）：\n  - 只在原文**首次明确提到**某角色年龄，或明确说明年龄发生了变化（过生日、时间跨越、魔法变老/变年轻）时填写。\n  - 写原文的原话值（如\"25\"\"二十出头\"\"看上去四十多岁\"），不要自己按时间流逝换算——系统会记录此刻的故事时间作锚点，以后随剧情时间自动推算。\n  - 首次填写年龄时，如果原文提到了该角色的经历（如\"在这行干了十年\"\"五年前从老家来\"），务必在 state_delta 里一并记录这些经历，因为这是首次建档、可能是唯一机会记录背景。年龄更新时（如过了生日、时间跨越后再次明确年龄），也要在 state_delta 里记录促成变化的原因（如\"度过了25岁生日\"\"在时间法阵里度过三年\"）。\n  - 已建档且有年龄的角色，如果本轮没有明确提到年龄变化，不要重复填写 age。\n\n────────────────────────────────\n【物品规则——同一件东西可能有很多种说法，要认出来是同一件】\n\n上下文会给你一份「已记录物品」列表。\n\n处理方法和人物类似：先用标准名（已记录列表里的名字）作为 name，再把本轮原文里对这件东西的其他描述性说法填进 aliases。\n\n举例：已记录物品列表里有「封印之盒」。本轮原文里，有人叫它「那个黑盒子」，有人叫它「有浮雕的盒子」，有人叫它「封印着什么东西的容器」。你应该：\n  - name = 「封印之盒」（用已记录的标准名）\n  - aliases = [\"那个黑盒子\", \"有浮雕的盒子\", \"封印着什么东西的容器\"]\n\n如果已记录列表里完全没有这件东西，说明它第一次出现，用原文里最完整、最有辨识度的那个说法作为 name（不要用「那个盒子」这种太泛的描述），aliases 填其他说法。\n\n如果一件东西 certain=false（比如只说「有人拿走了一件东西」，不知道具体是什么），change 留 null，进待审队列，不直接归档。\n\n关于同名不同物：如果两件东西同名但明显是不同的物品（比如两把都叫「青锋剑」的剑，分属不同角色，来源不同），处理方式和地理树里同名不同地点一样——只要不能确定是同一件，就当作不同物品分别记录，不要因为同名就合并成一件。\n\n────────────────────────────────\n【certain 字段说明】\n\ncharacters 和 items 里每一条都要加 certain 布尔值：\n  - true：原文里明确、清楚地说了这件事，你对这条信息有把握。\n  - false：你是根据上下文推测出来的，不完全确定，或者这条信息有歧义没有解决。\n\ncertain=false 的条目不会直接写进正式档案，会进入待审队列等待人工确认，所以请如实填写，不要为了省事全部写 true。\n\n注意：state_delta 为 null 或不填，意思是\"本轮该角色没有新变化\"，这不等于不确定——确定没有变化，certain 仍然填 true，不进待审队列。只有你对\"这条信息是否属实\"本身有疑问时，才填 certain=false。\n\n────────────────────────────────\n【其他字段规则】\n\n- turn_time：本轮剧情内时间（如\"入夜后\"\"第三天清晨\"）。原文完全无时间信息则 null。\n- location.is_current：主角当前是否在此处。\n- location.moved_from：本轮发生了位置移动则填出发地 path 数组，否则 null。\n- characters：只列本轮有实质互动或状态变化的角色。role 填身份标签。state_delta 用叙事句描述该角色本轮关键经历，格式\"在[地点][做了什么]，[结果/状态变化]\"。禁止只写数值变动，必须写成叙事。\n- items：只列本轮有状态变动的物品。无变动则空数组。\n- key_events：3-8个关键词/短语，必须是名词或名词短语。\n- unresolved：本轮出现但未解决的伏笔/悬念。无则空数组。\n- importance：1-10分。日常寒暄1-3，一般推进4-6，关键转折/战斗/揭秘/关系巨变7-10。\n- 无相关内容的字段输出 null 或空数组。\n\n{{turn_time_hint}}\n\n对话内容：\n{{context}}",        
         digestAutoMode: true, digestGraceSeconds: 15, digestBatchSize: 1, factUnitsMaxCount: 500,
         rerankUseLLM: false,
         rerankLLMPrompt: "你是\"因果一致性终审官\"，负责对向量检索召回的历史事实单元进行相关性终审评分，筛出真正有用的记忆，过滤噪音。你不生成叙事文本，不改写片段内容，只打分排序。\n\n【输入】\n- 当前语境摘要：{{current_context_summary}}\n- 当前语境时间信息：{{current_time}}（可能为空）\n- 当前语境地点信息：{{current_place}}（可能为空）\n- 待评分事实单元列表（含ID、回合号）：{{candidate_fragments}}\n\n【前置规则：同实体/同物品状态去重（在打分之前执行，优先级最高）】\n1. 将候选片段按其[E]或[I]中出现的实体/物品全称分组。\n2. 组内若存在多条记录同一实体/物品但状态互斥，只保留回合号最新的一条参与后续打分；其余较旧记录标记!HISTORICAL。\n3. 若当前语境包含回忆性触发词（\"想起\"\"曾经\"\"对比之前\"\"记得那时\"\"回忆\"等），则!HISTORICAL记录可重新参评，但ID后保留!HISTORICAL标记。\n4. !HISTORICAL与!CONFLICT是两套独立标记，互不覆盖。\n\n【评分权重准则（总分10分，仅对通过前置规则的片段执行）】\n1. 实体一致性（权重50%，最多5分）：片段中的[I]物品或[E]实体，是否与当前语境完全匹配且状态相关。完全匹配且状态相关：5分。部分匹配：2-3分。无匹配：0分。\n2. 动作连续性（权重30%，最多3分）：该片段的[A]动作或[C]因果，是否构成当前语境中正在发生动作的起因/前序/直接后果。是：2-3分。间接关联：1分。无关：0分。\n3. 环境逻辑（权重20%，最多2分）：片段的[T]时间和[L]地点与当前语境是否兼容。一致或当前信息为空：2分。不确定但不矛盾：1分。明显矛盾：0分，并标记!CONFLICT。\n\n【特殊规则】\n- !CONFLICT片段无论总分多少，强制排在最前。\n- 严禁对片段内容做任何改写、总结或解释。\n- 严禁输出评分依据或分析过程。\n\n【输出格式（唯一允许的格式）】\n按分数从高到低排列的片段ID列表，逗号分隔，标记紧跟ID。\n示例：frag_014!CONFLICT,frag_007,frag_022!HISTORICAL,frag_003\n\n现在开始评分。",
@@ -1579,55 +1579,87 @@ if (!cur[name].locked && location.desc) {
         saveWorlds();
     }
 
-    function applyNpcUpdates(characters, lockedWorldId, turnTime) {
-    function applyNpcUpdates(characters, lockedWorldId, turnTime) {
+            function applyNpcUpdates(characters, lockedWorldId, turnTime) {
         if (!characters || !characters.length || !lockedWorldId || !worlds[lockedWorldId]) return;
-        if (!worlds[lockedWorldId].npcArchive) worlds[lockedWorldId].npcArchive = {};
-        var archive = worlds[lockedWorldId].npcArchive;
-
-        // 泛称/代词黑名单：即使AI误输出，也不单独建档
+        var world = worlds[lockedWorldId];
+        var archive = world.npcArchive || (world.npcArchive = {});
+        var pending = world.pendingReview || (world.pendingReview = { npc: [], item: [] });
         var GENERIC_BLOCKLIST = ["你", "我", "他", "她", "它", "主角", "玩家", "那个人", "对方", "自己", "user", "player"];
 
-        // 模糊匹配已有角色名（与地理树同一套思路：去空格、判断包含关系）
-        function findSimilarNpc(names, newName) {
-            var lower = newName.toLowerCase().replace(/\s+/g, "");
-            for (var i = 0; i < names.length; i++) {
-                var eLower = names[i].toLowerCase().replace(/\s+/g, "");
-                if (eLower === lower) return names[i];
-                if (eLower.length >= 2 && lower.length >= 2 && (eLower.indexOf(lower) !== -1 || lower.indexOf(eLower) !== -1)) return names[i];
-            }
+        function findExactNpc(names, newName) {
+            var target = newName.trim();
+            for (var i = 0; i < names.length; i++) { if (names[i].trim() === target) return names[i]; }
             return null;
         }
 
-        for (var i = 0; i < characters.length; i++) {
-            var ch = characters[i];
-            if (!ch.name) continue;
+        characters.forEach(function(ch) {
+            if (!ch.name || GENERIC_BLOCKLIST.indexOf(ch.name.trim().toLowerCase()) !== -1) return;
             var rawName = ch.name.trim();
-            if (!rawName || GENERIC_BLOCKLIST.indexOf(rawName.toLowerCase()) !== -1) continue;
+            var standardName = findExactNpc(Object.keys(archive), rawName) || rawName;
 
-            var existingNames = Object.keys(archive);
-            var standardName = findSimilarNpc(existingNames, rawName) || rawName;
-
+            // certain===false 或无 state_delta → 进待审队列，不直接归档
+            if (ch.certain === false || !ch.state_delta || ch.state_delta === "null") {
+                pending.npc.push({ name: rawName, role: ch.role || "", state_delta: ch.state_delta || null,
+                    certain: ch.certain !== false, timestamp: turnTime || "", turn: state.turnCounter || 0 });
+                return;
+            }
             if (!archive[standardName]) {
-                archive[standardName] = {
-                    role: ch.role || "",
-                    appearance: { value: "", locked: false },
-                    age: { value: "", locked: false },
-                    timeline: [],
-                    custom: []
-                };
+                archive[standardName] = { role: ch.role || "", tier: archive[standardName] && archive[standardName].tier || "normal",
+                    order: Date.now(), hidden: false, lastActiveTurn: 0,
+                    appearance: { value: "", locked: false }, age: { value: "", locked: false }, timeline: [], custom: [] };
             }
             if (ch.role && !archive[standardName].role) archive[standardName].role = ch.role;
-            if (ch.state_delta && ch.state_delta !== "null") {
-                archive[standardName].timeline.push({
-                    event: ch.state_delta,
-                    timestamp: turnTime || getTurnTime() || "",
-                    auto: true,
-                    createdAt: Date.now()
-                });
-            }
-        }
+            archive[standardName].timeline.push({ event: ch.state_delta, timestamp: turnTime || getTurnTime() || "", auto: true, createdAt: Date.now() });
+            archive[standardName].lastActiveTurn = state.turnCounter || 0;
+        });
         saveWorlds();
+    }
+
+    function mergeNpcEntries(lockedWorldId, srcName, destName) {
+        var archive = worlds[lockedWorldId] && worlds[lockedWorldId].npcArchive;
+        if (!archive || !archive[srcName] || !archive[destName]) return false;
+        archive[destName].timeline = archive[destName].timeline.concat(archive[srcName].timeline);
+        archive[destName].timeline.sort(function(a, b) { return (a.timestamp || "").localeCompare(b.timestamp || ""); });
+        archive[destName].lastActiveTurn = Math.max(archive[destName].lastActiveTurn || 0, archive[srcName].lastActiveTurn || 0);
+        delete archive[srcName];
+        saveWorlds(); return true;
+    }
+
+    function applyItemUpdates(items, lockedWorldId, turnTime) {
+        if (!items || !items.length || !lockedWorldId || !worlds[lockedWorldId]) return;
+        var world = worlds[lockedWorldId];
+        var archive = world.itemArchive || (world.itemArchive = {});
+        var pending = world.pendingReview || (world.pendingReview = { npc: [], item: [] });
+
+        function findExactItem(names, newName) {
+            var target = newName.trim();
+            for (var i = 0; i < names.length; i++) { if (names[i].trim() === target) return names[i]; }
+            return null;
+        }
+
+        items.forEach(function(it) {
+            if (!it.name) return;
+            if (it.certain === false || !it.change) {
+                pending.item.push({ name: it.name.trim(), change: it.change || null, owner: it.owner || null,
+                    state: it.state || null, certain: it.certain !== false, timestamp: turnTime || "", turn: state.turnCounter || 0 });
+                return;
+            }
+            var standardName = findExactItem(Object.keys(archive), it.name.trim()) || it.name.trim();
+            if (!archive[standardName]) archive[standardName] = { hidden: false, lastActiveTurn: 0, history: [] };
+            archive[standardName].history.push({ change: it.change, owner: it.owner || null, state: it.state || null, timestamp: turnTime || "" });
+            archive[standardName].lastActiveTurn = state.turnCounter || 0;
+        });
+        saveWorlds();
+    }
+
+    function mergeItemEntries(lockedWorldId, srcName, destName) {
+        var archive = worlds[lockedWorldId] && worlds[lockedWorldId].itemArchive;
+        if (!archive || !archive[srcName] || !archive[destName]) return false;
+        archive[destName].history = archive[destName].history.concat(archive[srcName].history);
+        archive[destName].history.sort(function(a, b) { return (a.timestamp || "").localeCompare(b.timestamp || ""); });
+        archive[destName].lastActiveTurn = Math.max(archive[destName].lastActiveTurn || 0, archive[srcName].lastActiveTurn || 0);
+        delete archive[srcName];
+        saveWorlds(); return true;
     }
 
     function startDigestGrace() {
@@ -1728,6 +1760,47 @@ if (!cur[name].locked && location.desc) {
         }
         return meta;
     }
+    function buildDigestContextHints(lockedWorldId) {
+        var geoHint = "", npcHint = "", itemHint = "";
+        var wid = lockedWorldId;
+        if (!wid || !worlds[wid]) return { geoHint: geoHint, npcHint: npcHint, itemHint: itemHint };
+
+        var ACTIVE_WINDOW = 20;
+        var nowTurn = state.turnCounter || 0;
+
+        function stripHidden(obj) {
+            var out = {};
+            Object.keys(obj).forEach(function(k) {
+                if (obj[k].hidden) return;
+                out[k] = { desc: obj[k].desc || "", children: stripHidden(obj[k].children || {}) };
+            });
+            return out;
+        }
+        var visibleGeo = stripHidden(worlds[wid].geoTree || {});
+        if (Object.keys(visibleGeo).length)
+            geoHint = "\n\n【已记录地点（树状结构，请按同层匹配规则对照使用）】\n" + JSON.stringify(visibleGeo, null, 2);
+
+        var npcArchive = worlds[wid].npcArchive || {};
+        var activeNpc = Object.keys(npcArchive).filter(function(name) {
+            var e = npcArchive[name];
+            return !e.hidden && (nowTurn - (e.lastActiveTurn || 0)) <= ACTIVE_WINDOW;
+        }).map(function(name) {
+            var role = npcArchive[name].role;
+            return role ? name + "（" + role + "）" : name;
+        });
+        if (activeNpc.length)
+            npcHint = "\n\n【本轮可能在场角色（仅供消歧参考，不代表一定在场）】\n" + activeNpc.join("、");
+
+        var itemArchive = worlds[wid].itemArchive || {};
+        var activeItems = Object.keys(itemArchive).filter(function(name) {
+            var e = itemArchive[name];
+            return !e.hidden && (nowTurn - (e.lastActiveTurn || 0)) <= ACTIVE_WINDOW;
+        });
+        if (activeItems.length)
+            itemHint = "\n\n【已记录物品】\n" + activeItems.join("、");
+
+        return { geoHint: geoHint, npcHint: npcHint, itemHint: itemHint };
+    }
 
     function runDigestRequest(retryCount) {
         retryCount = retryCount || 0;
@@ -1764,37 +1837,11 @@ if (!cur[name].locked && location.desc) {
         if (headerMeta.location) turnTimeHint += "\n系统提供的当前地点：" + headerMeta.location;
         
         // 注入已有地理路径和物品列表，帮助AI保持命名一致
-        var geoHint = "", itemHint = "";
-        try {
-            var wid = getLinkedWorldId() || currentWorldId;
-            if (wid && worlds[wid]) {
-                var geoPaths = [];
-                function collectGeoPaths(obj, prefix) {
-                    var keys = Object.keys(obj);
-                    for (var gi = 0; gi < keys.length; gi++) {
-                        var fullP = prefix ? prefix + "/" + keys[gi] : keys[gi];
-                        geoPaths.push(fullP);
-                        if (obj[keys[gi]].children) collectGeoPaths(obj[keys[gi]].children, fullP);
-                    }
-                }
-                if (worlds[wid].geoTree) collectGeoPaths(worlds[wid].geoTree, "");
-                if (geoPaths.length) geoHint = "\n\n【已记录地理路径（location.path 必须复用这些已有名称，禁止用同义词或缩写替代）】\n" + geoPaths.join("\n");
+        // 回合计数器自增（供 NPC/物品的"最近活跃"判定使用）
+        state.turnCounter = (state.turnCounter || 0) + 1;
 
-                var itemNames = [];
-                var mems = worlds[wid].memories || [];
-                for (var mi = 0; mi < mems.length; mi++) {
-                    if (mems[mi].items) {
-                        for (var ii = 0; ii < mems[mi].items.length; ii++) {
-                            var iname = mems[mi].items[ii].name;
-                            if (iname && itemNames.indexOf(iname) === -1) itemNames.push(iname);
-                        }
-                    }
-                }
-                if (itemNames.length) itemHint = "\n\n【已记录物品（items.name 必须复用这些已有名称）】\n" + itemNames.join("、");
-
-                var npcNames = worlds[wid].npcArchive ? Object.keys(worlds[wid].npcArchive) : [];
-                if (npcNames.length) itemHint += "\n\n【已记录角色（characters.name 必须复用这些已有名称，禁止用身份/称号代替）】\n" + npcNames.join("、");
-            }
+        var hints = buildDigestContextHints(getLinkedWorldId() || currentWorldId);
+        context = context + hints.geoHint + hints.npcHint + hints.itemHint;
         } catch(e) {}
         context = context + geoHint + itemHint;
 
@@ -1848,7 +1895,8 @@ if (!cur[name].locked && location.desc) {
 
             // 分发到地理和NPC
             if (parsed.location) applyGeoUpdates(parsed.location, lockedWorldId);
-            if (parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId, parsed.turn_time || "");
+            if (parsed.characters && parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId, parsed.turn_time || "");
+            if (parsed.items && parsed.items.length) applyItemUpdates(parsed.items, lockedWorldId, parsed.turn_time || "");
             if (lockedWorldId === currentWorldId) {
                 state.memories = worlds[lockedWorldId].memories;
             }
@@ -1975,7 +2023,7 @@ function runCatchupDigest() {
             // 分发到地理和NPC
             if (parsed.location) applyGeoUpdates(parsed.location, lockedWorldId);
             if (parsed.characters && parsed.characters.length) applyNpcUpdates(parsed.characters, lockedWorldId);
-
+            if (parsed.items && parsed.items.length) applyItemUpdates(parsed.items, lockedWorldId);
             if (lockedWorldId === currentWorldId) {
                 state.memories = worlds[lockedWorldId].memories;
             }
