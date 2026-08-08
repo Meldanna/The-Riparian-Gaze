@@ -1430,7 +1430,7 @@
         }
     }
 
-        function applyGeoUpdates(location, lockedWorldId) {
+    function applyGeoUpdates(location, lockedWorldId) {
         if (!location || !lockedWorldId || !worlds[lockedWorldId]) return;
         if (!worlds[lockedWorldId].geoTree) worlds[lockedWorldId].geoTree = {};
         var tree = worlds[lockedWorldId].geoTree;
@@ -1524,62 +1524,113 @@
                     normalizedPath.push(path[p]);
                     if (!cur0[path[p]]) cur0[path[p]] = { desc: "", locked: false, isCurrent: false, children: {} };
                     cur0 = cur0[path[p]].children;
-                }
+    function applyGeoUpdates(location, lockedWorldId) {
+        if (!location || !lockedWorldId || !worlds[lockedWorldId]) return;
+        if (!worlds[lockedWorldId].geoTree) worlds[lockedWorldId].geoTree = {};
+        var tree = worlds[lockedWorldId].geoTree;
+        var path = location.path;
+        if (!Array.isArray(path) || !path.length) return;
+
+        var SUFFIXES = /[城镇村国区街路府殿宫楼阁谷山洞岛市县省堡寨营坊]$/;
+        function normalize(name) {
+            return name.toLowerCase().replace(/\s+/g, "").replace(/[（(].*?[）)]/g, "").replace(SUFFIXES, "");
+        }
+        function isSimilar(a, b) {
+            var na = normalize(a), nb = normalize(b);
+            if (a.replace(/\s+/g, "") === b.replace(/\s+/g, "")) return true;
+            if (!na || !nb) return false;
+            if (na === nb) return true;
+            var shorter = na.length <= nb.length ? na : nb;
+            var longer  = na.length <= nb.length ? nb : na;
+            if (shorter.length < 2) return false;
+            var isAffix = longer.indexOf(shorter) === 0 || longer.indexOf(shorter) === longer.length - shorter.length;
+            return isAffix && shorter.length >= longer.length / 2;
+        }
+        function findSimilarInLevel(siblings, newName) {
+            var keys = Object.keys(siblings);
+            for (var i = 0; i < keys.length; i++) { if (isSimilar(keys[i], newName)) return keys[i]; }
+            return null;
+        }
+
+        var normalizedPath = [];
+        var cur0 = tree;
+        for (var p = 0; p < path.length; p++) {
+            var similar = findSimilarInLevel(cur0, path[p]);
+            if (similar) {
+                normalizedPath.push(similar);
+                cur0 = cur0[similar].children;
+            } else {
+                normalizedPath.push(path[p]);
+                if (!cur0[path[p]]) cur0[path[p]] = { desc: "", locked: false, isCurrent: false, hidden: false, children: {} };
+                cur0 = cur0[path[p]].children;
             }
         }
         path = normalizedPath;
 
-        // ── 清除所有 isCurrent 标记 ──
         function clearCurrent(obj) {
-            var keys = Object.keys(obj);
-            for (var i = 0; i < keys.length; i++) {
-                obj[keys[i]].isCurrent = false;
-                if (obj[keys[i]].children) clearCurrent(obj[keys[i]].children);
-            }
+            Object.keys(obj).forEach(function(k) { obj[k].isCurrent = false; if (obj[k].children) clearCurrent(obj[k].children); });
         }
         clearCurrent(tree);
 
-        // ── 沿路径更新节点属性 ──
         var cur = tree;
         for (var i = 0; i < path.length; i++) {
             var name = path[i];
             if (i === path.length - 1) {
-if (!cur[name].locked && location.desc) {
-    if (!cur[name].desc) {
-        cur[name].desc = location.desc;
-    } else if (cur[name].desc.indexOf(location.desc) === -1 && location.desc.indexOf(cur[name].desc) === -1) {
-        // 新描述不是旧描述的子串，也不包含旧描述 → 追加
-        cur[name].desc = cur[name].desc + "；" + location.desc;
-    }
-    // 防止无限膨胀：超过300字就截断
-    if (cur[name].desc.length > 300) cur[name].desc = cur[name].desc.slice(0, 300) + "…";
-}
+                if (!cur[name].locked && location.desc) {
+                    if (!cur[name].desc) cur[name].desc = location.desc;
+                    else if (cur[name].desc.indexOf(location.desc) === -1) cur[name].desc += "；" + location.desc;
+                    if (cur[name].desc.length > 300) cur[name].desc = cur[name].desc.slice(0, 300) + "…";
+                }
                 if (location.is_current) cur[name].isCurrent = true;
             }
             cur = cur[name].children;
         }
 
-        // ── moved_from 同样处理 ──
         if (Array.isArray(location.moved_from) && location.moved_from.length) {
             var mfPath = location.moved_from;
-            // 同样做全局搜索修复
-            var mfRoot = findSimilarInLevel(tree, mfPath[0]);
-            if (!mfRoot) {
-                var mfHit = findInTree(tree, mfPath[0], []);
-                if (mfHit) mfPath = mfHit.path.concat(mfPath.slice(1));
-            }
             var cur2 = tree;
             for (var j = 0; j < mfPath.length; j++) {
                 var sim2 = findSimilarInLevel(cur2, mfPath[j]);
                 var use2 = sim2 || mfPath[j];
-                if (!cur2[use2]) cur2[use2] = { desc: "", locked: false, isCurrent: false, children: {} };
+                if (!cur2[use2]) cur2[use2] = { desc: "", locked: false, isCurrent: false, hidden: false, children: {} };
                 cur2 = cur2[use2].children;
             }
         }
         saveWorlds();
     }
 
-            function applyNpcUpdates(characters, lockedWorldId, turnTime) {
+    function mergeGeoNodes(lockedWorldId, srcPath, destPath) {
+        if (!worlds[lockedWorldId] || !worlds[lockedWorldId].geoTree) return false;
+        var tree = worlds[lockedWorldId].geoTree;
+        function locate(path) {
+            var cur = tree, parent = null, key = null;
+            for (var i = 0; i < path.length; i++) {
+                if (!cur[path[i]]) return null;
+                parent = cur; key = path[i];
+                cur = i === path.length - 1 ? cur[path[i]] : cur[path[i]].children;
+            }
+            return { node: parent[key], parent: parent, key: key };
+        }
+        function mergeChildren(destChildren, srcChildren) {
+            Object.keys(srcChildren).forEach(function(k) {
+                if (!destChildren[k]) { destChildren[k] = srcChildren[k]; }
+                else {
+                    if (srcChildren[k].desc && destChildren[k].desc.indexOf(srcChildren[k].desc) === -1)
+                        destChildren[k].desc = destChildren[k].desc ? destChildren[k].desc + "；" + srcChildren[k].desc : srcChildren[k].desc;
+                    mergeChildren(destChildren[k].children, srcChildren[k].children);
+                }
+            });
+        }
+        var src = locate(srcPath), dest = locate(destPath);
+        if (!src || !dest) return false;
+        if (src.node.desc && dest.node.desc.indexOf(src.node.desc) === -1)
+            dest.node.desc = dest.node.desc ? dest.node.desc + "；" + src.node.desc : src.node.desc;
+        mergeChildren(dest.node.children, src.node.children);
+        delete src.parent[src.key];
+        saveWorlds(); return true;
+    }
+
+    function applyNpcUpdates(characters, lockedWorldId, turnTime) {
         if (!characters || !characters.length || !lockedWorldId || !worlds[lockedWorldId]) return;
         var world = worlds[lockedWorldId];
         var archive = world.npcArchive || (world.npcArchive = {});
