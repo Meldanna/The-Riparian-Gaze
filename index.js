@@ -2708,7 +2708,7 @@ function refreshNpcList() {
                         '</div></div>';
                 }
             }
-
+        }
         return '<div class="tlg-archive-card" draggable="true" data-npc-name="' + escHtml(name) + '">' +
             '<div style="display:flex;align-items:center;gap:8px;">' +
             '<div style="width:' + dotSize + ';height:' + dotSize + ';border-radius:50%;background:#ffffff;flex-shrink:0;' + dotGlow + '"></div>' +
