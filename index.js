@@ -1,6 +1,9 @@
 /* 河岸凝视 v3 */
 (function () {
     "use strict";
+    window.onerror = function(msg, src, line, col, err) {
+        console.error("[河岸凝视] 语法/运行时错误 → " + msg + " | 文件:" + src + " | 行:" + line + " 列:" + col);
+    };
 
     var EXT_NAME = "RiparianGaze";
     var METADATA_KEY = "tlg_data";
