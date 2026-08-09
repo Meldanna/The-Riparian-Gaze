@@ -2974,14 +2974,11 @@ function renderNpcTimelineList(container, npc) {
             var idx = parseInt(btn.dataset.idx, 10);
             var item = list[idx]; if (!item) return;
             tlgPrompt("编辑经历", "", item.event, function(newText) {
-                item.event = newText; saveWorlds(); renderTimeline();
-            });
-            if (newText !== null && newText.trim()) {
-                list[idx].event = newText.trim();
+                list[idx].event = newText;
                 saveWorlds();
                 renderNpcTimelineList(container, npc);
                 toast("经历已更新");
-            }
+            });
         };
     });
     container.querySelectorAll(".tlg-npc-evt-del").forEach(function(btn) {
