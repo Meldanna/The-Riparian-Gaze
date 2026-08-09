@@ -2557,6 +2557,7 @@ function showEditGeoModal(fullPath) {
             if (ok) { bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已合并"); }
             else toast("合并失败");
         });
+    };
     bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-edit-save").onclick = function() {
         var newName = bd.querySelector("#tlg-geo-edit-name").value.trim();
