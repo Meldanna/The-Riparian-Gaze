@@ -2212,7 +2212,7 @@ function renderGeoCanvas() {
     geoCtx.scale(geoCamZoom, geoCamZoom);
     var NODE_R = 16, posMap = {};
     for (var i = 0; i < nodes.length; i++) posMap[nodes[i].fullPath] = nodes[i];
-    // 连线：统一白色
+    // 连线
     for (var j = 0; j < nodes.length; j++) {
         var n = nodes[j]; if (!n.parentPath) continue;
         var parent = posMap[n.parentPath]; if (!parent) continue;
@@ -2222,28 +2222,33 @@ function renderGeoCanvas() {
         geoCtx.bezierCurveTo(cx, parent.y, cx, n.y, n.x - NODE_R, n.y);
         geoCtx.strokeStyle = "rgba(255,255,255,0.6)"; geoCtx.lineWidth = 2; geoCtx.stroke();
     }
-    // 节点：统一白色描边（不再绘制铅笔编辑角标，编辑改由点击后弹出的信息框承担）
+    // 节点
     for (var k = 0; k < nodes.length; k++) {
         var nd = nodes[k], isSel = geoSelectedPath === nd.fullPath;
         geoCtx.beginPath();
-        geoCtx.arc(sx, sy, NODE_R * geoCamZoom, 0, Math.PI * 2);
-        geoCtx.fillStyle = "#ffffff";
+        geoCtx.arc(nd.x, nd.y, NODE_R, 0, Math.PI * 2);
+        geoCtx.fillStyle = isSel ? "#ffffff" : "rgba(255,255,255,0.85)";
         geoCtx.fill();
         geoCtx.lineWidth = 2.5;
-        geoCtx.strokeStyle = "rgba(255,255,255,0.9)";
+        geoCtx.strokeStyle = isSel ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.9)";
         geoCtx.stroke();
-        // 标签（右侧）
+        // 标签（上方居中）
         geoCtx.fillStyle = "#ffffff";
-        geoCtx.font = (11 * geoCamZoom) + "px -apple-system,sans-serif";
+        geoCtx.font = "11px -apple-system,sans-serif";
         geoCtx.textAlign = "center";
         geoCtx.textBaseline = "bottom";
-        geoCtx.fillText(n.name, sx, sy - NODE_R * geoCamZoom - 4);
-        if (nd.isCurrent) { geoCtx.font = "9px sans-serif"; geoCtx.textAlign = "right"; geoCtx.fillText("当前", nd.x - NODE_R - 6, nd.y); }
+        geoCtx.fillText(nd.name, nd.x, nd.y - NODE_R - 4);
+        if (nd.isCurrent) {
+            geoCtx.font = "9px sans-serif";
+            geoCtx.textAlign = "center";
+            geoCtx.textBaseline = "top";
+            geoCtx.fillStyle = "rgba(255,255,255,0.6)";
+            geoCtx.fillText("◎ 当前", nd.x, nd.y + NODE_R + 3);
+        }
     }
     geoCtx.restore();
     updateGeoInfoBox();
 }
-
 // 点击节点后弹出的信息框：显示名称/路径/简介，右下角一个小的「编辑」按钮进入编辑弹窗
 // 修复：改用 position:absolute 挂到 canvas 父容器；用 requestAnimationFrame 延迟读尺寸
 function updateGeoInfoBox() {
