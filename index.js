@@ -80,7 +80,23 @@
     function escHtml(str) {
         return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
-
+    function setupDragAutoScroll(scrollContainer) {
+        var EDGE = 40, SPEED = 6, _raf = null;
+        function tick(clientY) {
+            if (!scrollContainer) return;
+            var rect = scrollContainer.getBoundingClientRect();
+            var distTop = clientY - rect.top;
+            var distBot = rect.bottom - clientY;
+            if (distTop < EDGE && scrollContainer.scrollTop > 0) {
+                scrollContainer.scrollTop -= SPEED;
+            } else if (distBot < EDGE && scrollContainer.scrollTop < scrollContainer.scrollHeight - scrollContainer.clientHeight) {
+                scrollContainer.scrollTop += SPEED;
+            }
+        }
+        scrollContainer.addEventListener("dragover", function(e) {
+            tick(e.clientY);
+        });
+    }
     // ══════════════════════════════════════
     // 存储层
     // ══════════════════════════════════════
@@ -2204,7 +2220,7 @@ function renderGeoCanvas() {
         geoCtx.moveTo(parent.x + NODE_R, parent.y);
         var cx = (parent.x + n.x) / 2;
         geoCtx.bezierCurveTo(cx, parent.y, cx, n.y, n.x - NODE_R, n.y);
-        geoCtx.strokeStyle = "rgba(255,255,255,0.35)"; geoCtx.lineWidth = 1.2; geoCtx.stroke();
+        geoCtx.strokeStyle = "rgba(255,255,255,0.6)"; geoCtx.lineWidth = 2; geoCtx.stroke();
     }
     // 节点：统一白色描边（不再绘制铅笔编辑角标，编辑改由点击后弹出的信息框承担）
     for (var k = 0; k < nodes.length; k++) {
@@ -2914,6 +2930,7 @@ function renderNpcTimelineList(container, npc) {
     }).join("");
 
     var dragSrcIdx = null;
+    setupDragAutoScroll(container);
     container.querySelectorAll(".tlg-npc-evt-row").forEach(function(row) {
         row.ondragstart = function(e) { dragSrcIdx = parseInt(row.dataset.idx, 10); if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; row.style.opacity = "0.4"; };
         row.ondragend = function() { row.style.opacity = "1"; };
@@ -3211,7 +3228,7 @@ function refreshItemsList() {
         html += '</div>';
     }
     container.innerHTML = html;
-
+    setupDragAutoScroll(container);
     // 点击进详情
     container.querySelectorAll("[data-item]").forEach(function(el) {
         el.onclick = function() { showEditItemModal(el.dataset.item, itemMap[el.dataset.item]); };
@@ -3854,7 +3871,7 @@ function showEditItemModal(itemName, itemData) {
         }, { passive: true });
     }
 
-       function injectMenuButton() {
+    function injectMenuButton() {
         var BTN_ID = "tlg-menu-btn";
         if (document.getElementById(BTN_ID)) return;
         if (!isEnabled()) { var old = document.getElementById("tlg-menu-btn"); if (old) old.remove(); return; }
@@ -3890,6 +3907,16 @@ function showEditItemModal(itemName, itemData) {
         if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_filter", function (a, v) { return toggleFilter(); }, [], "切换记忆视野滤镜", true, true); }
         if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
             try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_filter", callback: function (a, v) { return toggleFilter(); }, helpString: "切换提取记忆范围：本时间线/全部。" })); } catch (e) {}
+        }
+        function openWorld() {
+            if (!isEnabled()) { toast("未授予观测权限"); return ""; }
+            openPanel();
+            setTimeout(function(){ document.querySelectorAll(".tlg-main-tab").forEach(function(t){ if(t.textContent.indexOf("世界档案")!==-1) t.click(); }); }, 100);
+            return "";
+        }
+        if (st && st.registerSlashCommand) { st.registerSlashCommand("tlg_world", function (a, v) { return openWorld(); }, [], "打开世界档案面板", true, true); }
+        if (window.SillyTavern && window.SillyTavern.SlashCommandParser) {
+            try { window.SillyTavern.SlashCommandParser.addCommandObject(window.SillyTavern.SlashCommand.fromProps({ name: "tlg_world", callback: function (a, v) { return openWorld(); }, helpString: "打开河岸凝视世界档案面板。" })); } catch (e) {}
         }
     }
 
@@ -4038,7 +4065,7 @@ function showEditItemModal(itemName, itemData) {
                 });
             }
         } catch (e) {}
-        console.log("[TLG] 河岸凝视 v3.6 已上线");
+        console.log("[TLG] 河岸凝视 v3 已上线");
     }
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
