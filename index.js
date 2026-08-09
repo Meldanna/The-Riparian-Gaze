@@ -660,10 +660,9 @@
             '<button type="button" class="tlg-btn tlg-btn-jump" id="tlg-brief-jump">↩ 确认跳转至此因果</button>';
         panel.querySelector("#tlg-brief-jump").onclick = function () { jumpToNode(nodeId); };
         panel.querySelector("#tlg-brief-rename").onclick = function () {
-            var newName = prompt("新节点名称：", node.name);
-            if (newName === null) return; newName = newName.trim(); if (!newName) return;
-            node.name = newName; panel.querySelector(".tlg-brief-header span").textContent = newName;
-            saveCurrentWorld(); refreshArchive(); renderCanvas(); toast("节点已重命名");
+            tlgPrompt("重命名节点", "", node.name, function(newName) {
+                node.name = newName; saveCurrentWorld(); renderCanvas(); updateBriefPanel();
+            });
         };
         panel.querySelector("#tlg-brief-pin").onclick = function () { showPinPathModal(nodeId); };
     }
@@ -2101,6 +2100,31 @@ function tlgModalBackdrop(id) {
     bd.addEventListener("click", function(e) { if (e.target === bd) bd.remove(); });
     return bd;
 }
+function tlgPrompt(title, message, defaultVal, callback) {
+        var panel = document.getElementById("tlg-panel");
+        var bd = document.createElement("div");
+        bd.className = "tlg-modal-backdrop";
+        bd.innerHTML = '<div class="tlg-modal">' +
+            '<div class="tlg-modal-title">' + escHtml(title) + '</div>' +
+            (message ? '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:10px;white-space:pre-wrap;line-height:1.5;">' + escHtml(message) + '</div>' : '') +
+            '<input type="text" class="tlg-input" id="tlg-prompt-input" value="' + escHtml(defaultVal || "") + '" style="margin-bottom:0;" />' +
+            '<div class="tlg-modal-actions">' +
+            '<button type="button" class="tlg-btn" id="tlg-prompt-cancel">取消</button>' +
+            '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-prompt-ok">确定</button>' +
+            '</div></div>';
+        (panel || document.body).appendChild(bd);
+        var input = bd.querySelector("#tlg-prompt-input");
+        input.focus();
+        input.select();
+        input.addEventListener("keydown", function(e) { if (e.key === "Enter") { bd.querySelector("#tlg-prompt-ok").click(); } });
+        bd.querySelector("#tlg-prompt-cancel").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-prompt-ok").onclick = function() {
+            var val = input.value;
+            bd.remove();
+            if (val !== null && val.trim() !== "") callback(val.trim());
+        };
+    }
+
 // ══════════════════════════════════════
 // 通用：面板右上角搜索控件（地理树 / NPC / 物品 三个子页共用）
 // ══════════════════════════════════════
@@ -2526,14 +2550,13 @@ function showEditGeoModal(fullPath) {
     bd.querySelector("#tlg-geo-edit-merge").onclick = function() {
         var allPaths = getAllGeoPaths().filter(function(p) { return p !== fullPath && p.indexOf(fullPath + "/") !== 0; });
         if (!allPaths.length) { toast("没有可合并的目标地点"); return; }
-        var sel = prompt("输入目标地点完整路径（当前地点将被删除并入目标）：\n\n" + allPaths.join("\n"));
-        if (!sel || !sel.trim()) return;
-        if (allPaths.indexOf(sel.trim()) === -1) { toast("路径不存在"); return; }
-        if (!confirm("将「" + fullPath + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
-        var ok = mergeGeoNodes(currentWorldId, fullPath.split("/"), sel.trim().split("/"));
-        if (ok) { bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已合并"); }
-        else toast("合并失败");
-    };
+        tlgPrompt("合并地点", "当前地点将被删除并入目标。\n\n可选路径：\n" + allPaths.join("\n"), "", function(sel) {
+            if (allPaths.indexOf(sel) === -1) { toast("路径不存在"); return; }
+            if (!confirm("将「" + fullPath + "」合并入「" + sel + "」？不可撤销。")) return;
+            var ok = mergeGeoNodes(currentWorldId, fullPath.split("/"), sel.split("/"));
+            if (ok) { bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已合并"); }
+            else toast("合并失败");
+        });
     bd.querySelector("#tlg-geo-edit-cancel").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-geo-edit-save").onclick = function() {
         var newName = bd.querySelector("#tlg-geo-edit-name").value.trim();
@@ -2890,14 +2913,13 @@ function showNpcDetailModal(name) {
         var archive = getNpcArchive();
         var others = Object.keys(archive).filter(function(n) { return n !== name; });
         if (!others.length) { toast("没有可合并的目标角色"); return; }
-        var sel = prompt("输入目标角色名（当前角色时间线将并入目标，当前角色档案删除）：\n\n" + others.join("、"));
-        if (!sel || !sel.trim()) return;
-        if (!archive[sel.trim()]) { toast("角色不存在"); return; }
-        if (!confirm("将「" + name + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
-        var ok = mergeNpcEntries(currentWorldId, name, sel.trim());
-        if (ok) { bd.remove(); refreshNpcList(); toast("角色已合并"); }
-        else toast("合并失败");
-    };
+        tlgPrompt("合并角色", "当前角色时间线将并入目标，当前角色档案删除。\n\n可选：" + others.join("、"), "", function(sel) {
+            if (!archive[sel]) { toast("角色不存在"); return; }
+            if (!confirm("将「" + name + "」合并入「" + sel + "」？不可撤销。")) return;
+            var ok = mergeNpcEntries(currentWorldId, name, sel);
+            if (ok) { bd.remove(); refreshNpcList(); toast("角色已合并"); }
+            else toast("合并失败");
+        });
     bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-save").onclick = function() {
         npc.role = bd.querySelector("#tlg-npc-role").value.trim();
@@ -2951,7 +2973,9 @@ function renderNpcTimelineList(container, npc) {
         btn.onclick = function() {
             var idx = parseInt(btn.dataset.idx, 10);
             var item = list[idx]; if (!item) return;
-            var newText = prompt("编辑经历内容：", item.event);
+            tlgPrompt("编辑经历", "", item.event, function(newText) {
+                item.event = newText; saveWorlds(); renderTimeline();
+            });
             if (newText !== null && newText.trim()) {
                 list[idx].event = newText.trim();
                 saveWorlds();
@@ -3296,14 +3320,13 @@ function showEditItemModal(itemName, itemData) {
         var archive = (currentWorldId && worlds[currentWorldId] && worlds[currentWorldId].itemArchive) || {};
         var others = Object.keys(archive).filter(function(n) { return n !== itemName; });
         if (!others.length) { toast("没有可合并的目标物品"); return; }
-        var sel = prompt("输入目标物品名（当前物品历史将并入目标，当前物品档案删除）：\n\n" + others.join("、"));
-        if (!sel || !sel.trim()) return;
-        if (!archive[sel.trim()]) { toast("物品不存在"); return; }
-        if (!confirm("将「" + itemName + "」合并入「" + sel.trim() + "」？不可撤销。")) return;
-        var ok = mergeItemEntries(currentWorldId, itemName, sel.trim());
-        if (ok) { bd.remove(); refreshItemsList(); toast("物品已合并"); }
-        else toast("合并失败");
-    };
+        tlgPrompt("合并物品", "当前物品历史将并入目标，当前物品档案删除。\n\n可选：" + others.join("、"), "", function(sel) {
+            if (!archive[sel]) { toast("物品不存在"); return; }
+            if (!confirm("将「" + itemName + "」合并入「" + sel + "」？不可撤销。")) return;
+            var ok = mergeItemEntries(currentWorldId, itemName, sel);
+            if (ok) { bd.remove(); refreshItemsList(); toast("物品已合并"); }
+            else toast("合并失败");
+        });
     bd.querySelector("#tlg-item-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-item-save").onclick = function() {
         if (!w) { bd.remove(); return; }
@@ -3377,20 +3400,14 @@ function showEditItemModal(itemName, itemData) {
     }
     function createNewWorldManual() {
         var chatId = getCurrentChatId();
-        var name = prompt("新世界名称：", chatId || ("世界 " + (Object.keys(worlds).length + 1)));
-        if (name === null) return;
-        name = name.trim() || ("世界 " + (Object.keys(worlds).length + 1));
-        var wid = generateId(); var rootId = generateId();
-        worlds[wid] = {
-            id: wid, name: name, chatId: chatId,
-            nodes: [{ id: rootId, name: "起源点", brief: "时间线起源", parentId: null, msgIdx: 0, statData: null, timestamp: Date.now(), children: [] }],
-            summaries: [], currentNodeId: rootId, pinnedPaths: [],
-            createdAt: Date.now(), updatedAt: Date.now()
-        };
-        currentWorldId = wid; setLinkedWorldId(wid);
-        state.nodes = worlds[wid].nodes; state.summaries = []; state.memories = []; state.currentNodeId = rootId; state.selectedNodeId = null;
-        saveWorlds(); toast("✦ 新世界已创建: " + name); refreshWorlds(); renderCanvas(); refreshArchive();
-    }
+        tlgPrompt("新建世界", "", chatId || ("世界 " + (Object.keys(worlds).length + 1)), function(name) {
+            var wid = generateId();
+            worlds[wid] = { name: name, chatId: chatId, nodes: [], summaries: [], memories: [], currentNodeId: null, npcArchive: {}, itemArchive: {}, geoTree: {}, pendingReview: { npc: [], item: [] } };
+            currentWorldId = wid; setLinkedWorldId(wid);
+            state.nodes = []; state.summaries = []; state.memories = []; state.currentNodeId = null;
+            saveWorlds(); refreshWorlds(); renderCanvas(); refreshArchive();
+            toast("世界已创建: " + name);
+        });
     function fetchVectorModelList() {
         var apiUrl = (globalApi.vectorUrl || "").trim(), apiKey = (globalApi.vectorKey || "").trim();
         if (!apiUrl) { toast("请先设置向量 API 地址"); return; }
@@ -3444,7 +3461,7 @@ function showEditItemModal(itemName, itemData) {
         }).join("");
         container.querySelectorAll(".tlg-worlds-switch").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; saveCurrentWorld(); currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.memories = w.memories || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); state.selectedNodeId = null; saveWorlds(); toast("观测焦点已转移: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
         container.querySelectorAll(".tlg-worlds-link").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; saveCurrentWorld(); worlds[wid].chatId = chatId; currentWorldId = wid; setLinkedWorldId(wid); var w = worlds[wid]; state.nodes = w.nodes || []; state.summaries = w.summaries || []; state.memories = w.memories || []; state.currentNodeId = w.currentNodeId || (state.nodes.length ? state.nodes[0].id : null); saveWorlds(); toast("连接建立并聚焦: " + w.name); refreshWorlds(); renderCanvas(); refreshArchive(); }); });
-        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var newName = prompt("覆盖标识符:", worlds[wid].name || ""); if (newName === null) return; worlds[wid].name = newName.trim() || worlds[wid].name; saveWorlds(); refreshWorlds(); toast("标识符已覆盖"); }); });
+        container.querySelectorAll(".tlg-worlds-rename").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; tlgPrompt("覆盖标识符", "", worlds[wid].name || "", function(newName) { worlds[wid].name = newName; saveWorlds(); refreshWorlds(); toast("标识符已覆盖"); }); }); });
         container.querySelectorAll(".tlg-worlds-export").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; var w = worlds[wid]; var blob = new Blob([JSON.stringify(w, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = (w.name || "world") + ".json"; a.click(); URL.revokeObjectURL(url); toast("源数据提取成功: " + w.name); }); });
         container.querySelectorAll(".tlg-worlds-del").forEach(function (btn) { btn.addEventListener("click", function () { var wid = btn.dataset.wid; if (wid === currentWorldId) { toast("无法毁灭当前正聚焦的世界"); return; } if (!confirm("警告：确认引发「" + (worlds[wid] ? worlds[wid].name : "") + "」的坍缩？所有观测记录将永久湮灭")) return; delete worlds[wid]; saveWorlds(); refreshWorlds(); toast("世界已坍缩"); }); });
         container.querySelectorAll(".tlg-worlds-clear-summaries").forEach(function(btn) {
