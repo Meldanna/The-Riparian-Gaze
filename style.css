@@ -8,81 +8,105 @@
   background: #000000 !important;
   color: #ffffff !important;
   font-family: "result", -apple-system, sans-serif !important;
+  position: relative;
 }
 
 /* ══════════════════════════════════════
-   弹窗通用组件（全局，不局限于某个容器 ID —
-   这样地点/NPC/物品编辑等直接挂在 document.body 下的弹窗也能生效）
+   弹窗改为面板内嵌（不再全屏遮罩，而是覆盖在 #tlg-panel 内部）
    ══════════════════════════════════════ */
+.tlg-modal-backdrop {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 100 !important;
+  background: rgba(0,0,0,0.85) !important;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .tlg-modal {
   background: #000000 !important;
   border: 1px solid #3a3a4a;
   border-radius: 6px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.7);
-  padding: 18px;
+  padding: 14px;
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
   box-sizing: border-box;
   color: #ffffff !important;
+  margin-bottom: 24px;
 }
 .tlg-modal * { color: #ffffff; }
 .tlg-modal-title {
-  font-size: 16px; font-weight: 600; color: #ffffff !important; margin-bottom: 14px;
+  font-size: 14px; font-weight: 600; color: #ffffff !important; margin-bottom: 10px;
 }
 .tlg-modal-actions {
   display: flex !important; align-items: center; justify-content: flex-end;
-  gap: 8px; margin-top: 14px; flex-wrap: wrap;
+  gap: 6px; margin-top: 10px; flex-wrap: wrap;
 }
-/* 同排按钮统一最小宽度并居中文字，保证大小一致、左右对齐 */
-.tlg-modal-actions .tlg-btn { min-width: 64px; justify-content: center; }
+.tlg-modal-actions .tlg-btn { min-width: 56px; justify-content: center; }
 
 /* ══════════════════════════════════════
-   表单元素（全局）
+   表单元素（高度与按钮一致：约 28px）
    ══════════════════════════════════════ */
 .tlg-label {
   display: block !important;
-  font-size: 13px;
-  color: #ffffff !important;
-  margin-bottom: 6px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.7) !important;
+  margin-bottom: 3px;
   font-weight: 500;
 }
 .tlg-input,
-.tlg-textarea,
 .tlg-select {
   width: 100%;
   display: block;
-  padding: 10px 12px;
+  padding: 5px 8px;
   background: #000000 !important;
   border: 1px solid #2a2a3a;
   border-radius: 3px;
   color: #ffffff !important;
-  font-size: 16px; /* 保持16px避免移动端聚焦自动放大 */
+  font-size: 12px;
+  line-height: 16px;
+  height: 28px;
   outline: none;
   box-sizing: border-box;
-  margin-bottom: 12px; /* 与下一个字段自然分行、留出间距 */
+  margin-bottom: 8px;
 }
 .tlg-input:focus,
 .tlg-textarea:focus,
 .tlg-select:focus { border-color: #ffffff; }
 .tlg-textarea {
-  min-height: 110px; /* 编辑框加大 */
-  font-size: 14px;
+  width: 100%;
+  display: block;
+  padding: 5px 8px;
+  background: #000000 !important;
+  border: 1px solid #2a2a3a;
+  border-radius: 3px;
+  color: #ffffff !important;
+  font-size: 12px;
   line-height: 1.5;
+  min-height: 56px;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 8px;
   resize: vertical;
 }
 .tlg-row {
-  display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;
+  display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap;
 }
 .tlg-row .tlg-input,
 .tlg-row .tlg-select { flex: 1; min-width: 0; margin-bottom: 0; }
 
 /* ══════════════════════════════════════
-   按钮（全局，黑底白字，尺寸统一偏小）
+   按钮（高度 28px 对齐）
    ══════════════════════════════════════ */
 .tlg-btn {
   display: inline-flex !important;
   align-items: center; justify-content: center;
-  padding: 6px 10px;
+  padding: 5px 10px;
+  height: 28px;
   background: #000000 !important;
   border: 1px solid #4a4a5e;
   border-radius: 3px;
@@ -100,25 +124,26 @@
 .tlg-btn-danger { border-color: #ff5a5a; }
 .tlg-btn-danger:hover { border-color: #ff4444; box-shadow: 0 0 10px rgba(255,68,68,0.2); }
 .tlg-btn-jump {
-  width: 100%; padding: 12px;
-  border-color: #ffffff; font-size: 13px;
+  width: 100%; padding: 8px;
+  height: auto;
+  border-color: #ffffff; font-size: 12px;
 }
 .tlg-btn-jump:hover { box-shadow: 0 0 8px rgba(255,255,255,0.15); }
 
-/* 开关（全局） */
+/* 开关 */
 .tlg-toggle {
-  position: relative; width: 40px; height: 22px; background: #2a2a3a;
-  border-radius: 11px; cursor: pointer; flex-shrink: 0; display: inline-block;
+  position: relative; width: 36px; height: 20px; background: #2a2a3a;
+  border-radius: 10px; cursor: pointer; flex-shrink: 0; display: inline-block;
 }
 .tlg-toggle.on { background: #9999bb; }
 .tlg-toggle::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
   background: #ffffff; border-radius: 50%; transition: transform .2s;
 }
-.tlg-toggle.on::after { transform: translateX(18px); }
+.tlg-toggle.on::after { transform: translateX(16px); }
 
 /* ══════════════════════════════════════
-   卡片 / 区块（全局）
+   卡片 / 区块
    ══════════════════════════════════════ */
 .tlg-section,
 .tlg-archive-card,
@@ -126,34 +151,35 @@
   background: #000000 !important;
   border: 1px solid #2a2a3a !important;
   border-radius: 4px;
-  padding: 12px;
-  margin-bottom: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
   color: #ffffff;
 }
-.tlg-section-title { font-size: 13px; font-weight: 600; color: #ffffff !important; margin-bottom: 10px; }
+.tlg-section-title { font-size: 12px; font-weight: 600; color: #ffffff !important; margin-bottom: 8px; }
 .tlg-archive-card.current { border-color: #ffffff !important; box-shadow: inset 0 0 15px rgba(255,255,255,0.05); }
-.tlg-archive-title { font-size: 14px; font-weight: 600; color: #ffffff !important; }
-.tlg-archive-meta { font-size: 11px; color: rgba(255,255,255,0.6) !important; margin-top: 4px; }
-.tlg-archive-brief { margin-top: 8px; font-size: 12px; line-height: 1.55; color: rgba(255,255,255,0.85) !important; }
+.tlg-archive-title { font-size: 13px; font-weight: 600; color: #ffffff !important; }
+.tlg-archive-meta { font-size: 10px; color: rgba(255,255,255,0.6) !important; margin-top: 3px; }
+.tlg-archive-brief { margin-top: 6px; font-size: 11px; line-height: 1.5; color: rgba(255,255,255,0.85) !important; }
 
 /* ══════════════════════════════════════
-   #tlg-panel 专属布局（面板结构，与上面的通用组件无关）
+   #tlg-panel 面板布局
    ══════════════════════════════════════ */
 #tlg-panel #tlg-tabs {
-  display:flex;height:48px;min-height:48px;border-bottom:1px solid #2a2a3a;
-  background:#000;flex-shrink:0;overflow-x:auto;
+  display:flex;height:40px;min-height:40px;border-bottom:1px solid #2a2a3a;
+  background:#000;flex-shrink:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;
 }
+#tlg-panel #tlg-tabs::-webkit-scrollbar { display: none; }
 #tlg-panel .tlg-tab {
-  padding:0 14px;height:100%;display:flex;align-items:center;cursor:pointer;
-  font-size:13px;color:rgba(255,255,255,0.55);border-bottom:2px solid transparent;
+  padding:0 12px;height:100%;display:flex;align-items:center;cursor:pointer;
+  font-size:12px;color:rgba(255,255,255,0.55);border-bottom:2px solid transparent;
   flex-shrink:0;white-space:nowrap;transition:color .2s;font-family:serif;letter-spacing:2px;text-transform:uppercase;
 }
 #tlg-panel .tlg-tab.active {
   color:#ffffff;background:transparent;border-bottom-color:#ffffff;text-shadow:0 0 8px rgba(255,255,255,0.5);
 }
 #tlg-panel #tlg-close {
-  margin-left:auto;padding:0 16px;display:flex;align-items:center;
-  cursor:pointer;color:rgba(255,255,255,0.7);font-size:20px;flex-shrink:0;
+  margin-left:auto;padding:0 14px;display:flex;align-items:center;
+  cursor:pointer;color:rgba(255,255,255,0.7);font-size:18px;flex-shrink:0;
 }
 #tlg-panel #tlg-body { flex:1;min-height:0;overflow:hidden;position:relative; }
 #tlg-panel .tlg-view { display:none;position:absolute;inset:0;overflow:hidden; }
@@ -161,7 +187,7 @@
 
 #tlg-panel #tlg-canvas-wrap { flex:1;position:relative;overflow:hidden;min-width:0;min-height:0; }
 #tlg-panel #tlg-tree-canvas { position:absolute;inset:0;width:100%;height:100%;touch-action:none; }
-#tlg-panel #tlg-canvas-toolbar { position:absolute;top:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:8px;z-index:2; }
+#tlg-panel #tlg-canvas-toolbar { position:absolute;top:8px;left:8px;right:8px;display:flex;flex-wrap:wrap;gap:6px;z-index:2; }
 
 #tlg-panel #tlg-brief-panel {
   width:0;background:#000;border-left:1px solid #2a2a3a;
@@ -177,42 +203,30 @@
 }
 
 #tlg-panel .tlg-brief-header {
-  padding:12px 14px;border-bottom:1px solid #2a2a3a;font-size:13px;font-weight:600;
+  padding:10px 12px;border-bottom:1px solid #2a2a3a;font-size:12px;font-weight:600;
   color:#ffffff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;letter-spacing:1px;
 }
 #tlg-panel .tlg-brief-body {
-  flex:1;overflow-y:auto;padding:12px 14px;font-size:13px;line-height:1.65;
+  flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;line-height:1.6;
   -webkit-overflow-scrolling:touch;color:rgba(255,255,255,0.9);
 }
-#tlg-panel .tlg-brief-footer { padding:10px 14px;border-top:1px solid #2a2a3a;flex-shrink:0; }
+#tlg-panel .tlg-brief-footer { padding:8px 12px;border-top:1px solid #2a2a3a;flex-shrink:0; }
 
 #tlg-panel .tlg-scroll-panel {
   display:flex;flex-direction:column;width:100%;height:100%;
-  padding:12px;overflow-y:auto;-webkit-overflow-scrolling:touch;gap:12px;
+  padding:10px;overflow-y:auto;-webkit-overflow-scrolling:touch;gap:10px;
 }
 
 /* ══════════════════════════════════════
-   #tlg-anchor-modal 专属（弹窗通用样式已全局化，这里只保留它特有的尺寸约束）
-   ══════════════════════════════════════ */
-#tlg-anchor-modal .tlg-modal { max-width: 420px; }
-
-/* ══════════════════════════════════════
-   滚动条（全局）
-   ══════════════════════════════════════ */
-*::-webkit-scrollbar { width:4px; }
-*::-webkit-scrollbar-track { background:transparent; }
-*::-webkit-scrollbar-thumb { background:#3a3a4a;border-radius:2px; }
-*::-webkit-scrollbar-thumb:hover { background:#6a6a78; }
-/* ══════════════════════════════════════
-   世界档案子标签（地理/样本库/物品）
+   世界档案子标签
    ══════════════════════════════════════ */
 .tlg-subtab {
-  padding: 0 14px;
-  height: 48px;
+  padding: 0 12px;
+  height: 40px;
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   color: rgba(255,255,255,0.55);
   border-bottom: 2px solid transparent;
   flex-shrink: 0;
@@ -227,9 +241,13 @@
   text-shadow: 0 0 8px rgba(255,255,255,0.5);
 }
 .tlg-subtab:hover { color: rgba(255,255,255,0.8); }
-/* 地理小窗隐藏滚动条但保留滑动 */
+
+/* 地理小窗 */
 #tlg-geo-infobox .tlg-archive-brief::-webkit-scrollbar { display: none; }
 #tlg-geo-infobox .tlg-archive-brief { scrollbar-width: none; -ms-overflow-style: none; }
-/* 标签栏隐藏横向滚动条但保留可滑动 */
-#tlg-panel #tlg-tabs { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
-#tlg-panel #tlg-tabs::-webkit-scrollbar { display: none; }
+
+/* 滚动条 */
+*::-webkit-scrollbar { width:4px; }
+*::-webkit-scrollbar-track { background:transparent; }
+*::-webkit-scrollbar-thumb { background:#3a3a4a;border-radius:2px; }
+*::-webkit-scrollbar-thumb:hover { background:#6a6a78; }
