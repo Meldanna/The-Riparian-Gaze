@@ -2921,6 +2921,7 @@ function showNpcDetailModal(name) {
             if (ok) { bd.remove(); refreshNpcList(); toast("角色已合并"); }
             else toast("合并失败");
         });
+    };
     bd.querySelector("#tlg-npc-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-npc-save").onclick = function() {
         npc.role = bd.querySelector("#tlg-npc-role").value.trim();
@@ -2975,7 +2976,7 @@ function renderNpcTimelineList(container, npc) {
             var idx = parseInt(btn.dataset.idx, 10);
             var item = list[idx]; if (!item) return;
             tlgPrompt("编辑经历", "", item.event, function(newText) {
-                list[idx].event = newText;
+                list[idx].event = newText.trim();
                 saveWorlds();
                 renderNpcTimelineList(container, npc);
                 toast("经历已更新");
@@ -3325,6 +3326,7 @@ function showEditItemModal(itemName, itemData) {
             if (ok) { bd.remove(); refreshItemsList(); toast("物品已合并"); }
             else toast("合并失败");
         });
+    };
     bd.querySelector("#tlg-item-close").onclick = function() { bd.remove(); };
     bd.querySelector("#tlg-item-save").onclick = function() {
         if (!w) { bd.remove(); return; }
