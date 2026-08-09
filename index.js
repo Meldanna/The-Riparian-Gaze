@@ -3408,6 +3408,7 @@ function showEditItemModal(itemName, itemData) {
             saveWorlds(); refreshWorlds(); renderCanvas(); refreshArchive();
             toast("世界已创建: " + name);
         });
+    };
     function fetchVectorModelList() {
         var apiUrl = (globalApi.vectorUrl || "").trim(), apiKey = (globalApi.vectorKey || "").trim();
         if (!apiUrl) { toast("请先设置向量 API 地址"); return; }
