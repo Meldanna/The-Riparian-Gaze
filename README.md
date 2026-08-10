@@ -1,4 +1,4 @@
-```markdown
+markdown
 # 🌊 河岸凝视 The Riparian Gaze v3
 
 **SillyTavern 动态因果与时空记忆引擎**
@@ -108,7 +108,7 @@ extension_settings.RiparianGaze
 - **DOM 隔离设计**：所有动态注入的元素均采用特定前缀的 Scoped CSS 样式，并强制 `writing-mode: horizontal-tb` 防止被外部主题破坏布局。
 - **异步兼容**：未使用 `async/await`，全 `.then()` 链式调用，兼容老旧设备与 WebView。
 
----
+
 
 ## 📜 版本历史
 
