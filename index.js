@@ -1,4 +1,4 @@
-/* 河岸凝视 v3 */
+/* 河岸凝视 v1 */
 (function () {
     "use strict";
     window.onerror = function(msg, src, line, col, err) {
@@ -4077,7 +4077,7 @@ function showEditItemModal(itemName, itemData) {
                 });
             }
         } catch (e) {}
-        console.log("[TLG] 河岸凝视 v3 已上线");
+        console.log("[TLG] 河岸凝视 v1 已上线");
     }
 
     if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
