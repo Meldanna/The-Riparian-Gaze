@@ -2117,7 +2117,30 @@ function tlgPrompt(title, message, defaultVal, callback) {
             if (val !== null && val.trim() !== "") callback(val.trim());
         };
     }
-
+    function tlgSelectPrompt(title, message, options, callback) {
+        var bd = tlgModalBackdrop("tlg-select-prompt-" + Date.now());
+        var optsHtml = options.map(function(opt) {
+            return '<option value="' + escHtml(opt) + '">' + escHtml(opt) + '</option>';
+        }).join("");
+        bd.innerHTML = '<div class="tlg-modal">' +
+            '<div class="tlg-modal-title">' + escHtml(title) + '</div>' +
+            (message ? '<div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:10px;white-space:pre-wrap;line-height:1.5;">' + escHtml(message) + '</div>' : '') +
+            '<select class="tlg-select" id="tlg-select-prompt-sel" style="margin-bottom:10px;width:100%;"><option value="">请选择...</option>' + optsHtml + '</select>' +
+            tlgActionsRow(
+                tlgBtn("tlg-select-prompt-cancel", "取消") +
+                tlgBtn("tlg-select-prompt-ok", "确定", "primary")
+            ) +
+            '</div>';
+        document.body.appendChild(bd);
+        var sel = bd.querySelector("#tlg-select-prompt-sel");
+        sel.focus();
+        bd.querySelector("#tlg-select-prompt-cancel").onclick = function() { bd.remove(); };
+        bd.querySelector("#tlg-select-prompt-ok").onclick = function() {
+            var val = sel.value;
+            bd.remove();
+            if (val) callback(val);
+        };
+    }
 // ══════════════════════════════════════
 // 通用：面板右上角搜索控件（地理树 / NPC / 物品 三个子页共用）
 // ══════════════════════════════════════
@@ -2543,9 +2566,8 @@ function showEditGeoModal(fullPath) {
     bd.querySelector("#tlg-geo-edit-merge").onclick = function() {
         var allPaths = getAllGeoPaths().filter(function(p) { return p !== fullPath && p.indexOf(fullPath + "/") !== 0; });
         if (!allPaths.length) { toast("没有可合并的目标地点"); return; }
-        tlgPrompt("合并地点", "当前地点将被删除并入目标。\n\n可选路径：\n" + allPaths.join("\n"), "", function(sel) {
-            if (allPaths.indexOf(sel) === -1) { toast("路径不存在"); return; }
-            if (!confirm("将「" + fullPath + "」合并入「" + sel + "」？不可撤销。")) return;
+        tlgSelectPrompt("合并地点", "当前地点将被删除并入目标。", allPaths, function(sel) {
+            if (!confirm("将「" + fullPath + "」合并入「" + sel + "」?不可撤销。")) return;
             var ok = mergeGeoNodes(currentWorldId, fullPath.split("/"), sel.split("/"));
             if (ok) { bd.remove(); geoSelectedPath = null; renderGeoCanvas(); toast("地点已合并"); }
             else toast("合并失败");
@@ -2907,9 +2929,8 @@ function showNpcDetailModal(name) {
         var archive = getNpcArchive();
         var others = Object.keys(archive).filter(function(n) { return n !== name; });
         if (!others.length) { toast("没有可合并的目标角色"); return; }
-        tlgPrompt("合并角色", "当前角色时间线将并入目标，当前角色档案删除。\n\n可选：" + others.join("、"), "", function(sel) {
-            if (!archive[sel]) { toast("角色不存在"); return; }
-            if (!confirm("将「" + name + "」合并入「" + sel + "」？不可撤销。")) return;
+        tlgSelectPrompt("合并角色", "当前角色时间线将并入目标,当前角色档案删除。", others, function(sel) {
+            if (!confirm("将「" + name + "」合并入「" + sel + "」?不可撤销。")) return;
             var ok = mergeNpcEntries(currentWorldId, name, sel);
             if (ok) { bd.remove(); refreshNpcList(); toast("角色已合并"); }
             else toast("合并失败");
@@ -3312,9 +3333,8 @@ function showEditItemModal(itemName, itemData) {
         var archive = (currentWorldId && worlds[currentWorldId] && worlds[currentWorldId].itemArchive) || {};
         var others = Object.keys(archive).filter(function(n) { return n !== itemName; });
         if (!others.length) { toast("没有可合并的目标物品"); return; }
-        tlgPrompt("合并物品", "当前物品历史将并入目标，当前物品档案删除。\n\n可选：" + others.join("、"), "", function(sel) {
-            if (!archive[sel]) { toast("物品不存在"); return; }
-            if (!confirm("将「" + itemName + "」合并入「" + sel + "」？不可撤销。")) return;
+        tlgSelectPrompt("合并物品", "当前物品历史将并入目标,当前物品档案删除。", others, function(sel) {
+            if (!confirm("将「" + itemName + "」合并入「" + sel + "」?不可撤销。")) return;
             var ok = mergeItemEntries(currentWorldId, itemName, sel);
             if (ok) { bd.remove(); refreshItemsList(); toast("物品已合并"); }
             else toast("合并失败");
