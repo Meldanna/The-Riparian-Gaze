@@ -1648,13 +1648,6 @@
                     if (a && archive[standardName].aliases.indexOf(a) === -1) archive[standardName].aliases.push(a);
                 });
             }
-
-            if (it.aliases && it.aliases.length) {
-                if (!archive[standardName].aliases) archive[standardName].aliases = [];
-                it.aliases.forEach(function(a) {
-                    if (a && archive[standardName].aliases.indexOf(a) === -1) archive[standardName].aliases.push(a);
-                });
-            }
         });
         saveWorlds();
     }
@@ -3522,6 +3515,11 @@ function showEditItemModal(itemName, itemData) {
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">手动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 步</label></div>' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">摘要铭刻</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动铭刻(每回合触发)</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">铭刻缓冲 <input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 秒</label></div>' +
+            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">补全批次 <input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合/批</label></div>' +
+            '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">自动浓缩</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">档案满时自动浓缩</span><div class="tlg-toggle ' + (s.autoCompress ? "on" : "") + '" id="tlg-auto-compress-toggle"></div></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条 · 每批浓缩 <input class="tlg-input" id="tlg-compress-batch" type="number" min="2" value="' + (s.compressBatchSize || 10) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div></div>' +
@@ -3537,7 +3535,7 @@ function showEditItemModal(itemName, itemData) {
             '<div id="tlg-tabs">' +
             '<div class="tlg-tab active" data-tab="tree">命运分支线</div>' +
             '<div class="tlg-tab" data-tab="archive">观测坐标</div>' +
-            '<div class="tlg-tab" data-tab="summary">因果档案</div>' +
+            '<div class="tlg-tab" data-tab="summary">因果操作台</div>' +
             '<div class="tlg-tab" data-tab="vault">观测档案库</div>' +
             '<div class="tlg-tab" data-tab="worldarchive">世界档案</div>' +     
             '<div class="tlg-tab" data-tab="worlds">诸世界</div>' +
@@ -3560,7 +3558,7 @@ function showEditItemModal(itemName, itemData) {
             '<div id="tlg-pinned-paths" style="margin-bottom:12px;"></div>' +
             '<div style="font-size:12px;color:#7a7a8a;margin-bottom:8px;border-top:1px solid #1e1e2a;padding-top:10px;">全部节点</div>' +
             '<div id="tlg-archive-list"></div></div></div>' +
-            // 因果档案
+            // 因果操作台
             summaryTabHtml +
             // 观测档案库
             vaultTabHtml +
@@ -3619,10 +3617,6 @@ function showEditItemModal(itemName, itemData) {
             // ─── 摘要引擎 ───
             '<div class="tlg-section"><div class="tlg-section-title">摘要引擎（每回合事实抽取 → 向量化）</div>' +
             '<div style="font-size:11px;color:#7a7a8a;margin-bottom:8px;">每回合AI生成后异步调用，输出结构化事实单元 [T][L][E][I][A][C]，供向量检索命中，与总结并行独立，互不替代[E]字段供样本库，[L]字段供地理库</div>' +
-            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式（每回合触发）</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
-            '<label class="tlg-label">补全批次大小（每批覆盖N回合）</label><input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:80px;margin-bottom:8px" />' +
-            '<label class="tlg-label">铭刻缓冲（回复后等待N秒再执行，0=立即）</label><input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:80px;margin-bottom:8px" />' +
-            '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;margin-bottom:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button>' +
             '<label class="tlg-label">摘要端点</label><div class="tlg-row"><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" /><button type="button" class="tlg-btn" id="tlg-test-digest-api" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">探针</button></div>' +
             '<label class="tlg-label">摘要密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="margin-bottom:8px" />' +
             '<label class="tlg-label">摘要核心</label><div class="tlg-row"><select class="tlg-select" id="tlg-digest-model-select" style="flex:1"></select><button type="button" class="tlg-btn" id="tlg-fetch-digest-models" style="writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">检索</button></div>' +
