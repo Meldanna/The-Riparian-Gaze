@@ -1,4 +1,4 @@
-/* 河岸凝视 v1 */
+/* 河岸凝视 v3 */
 (function () {
     "use strict";
     window.onerror = function(msg, src, line, col, err) {
@@ -84,7 +84,7 @@
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
     function toast(msg, duration) {
-        duration = duration || C.TOAST_DURATION;
+        duration = duration || 2800;
         var el = document.createElement("div");
         el.textContent = msg;
         el.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);max-width:80vw;padding:12px 18px;background:#050508;border:1px solid #3a3a4a;border-radius:4px;color:#ffffff;font-size:13px;z-index:2147483647;text-align:center;pointer-events:none;opacity:1;transition:opacity 0.4s;box-shadow:0 4px 20px rgba(0,0,0,0.8);";
@@ -2073,7 +2073,7 @@
 	    return '<label class="tlg-label">' + escHtml(labelText) + '</label>' + innerHtml;
 	}
 	function tlgBtn(id, text, variant, extraStyle) {
-	    var cls = "tlg-btn" + (variant === "primary" ? " tlg-btn-primary" : "");
+	    var cls = "tlg-btn" + (variant === "primary" ? " tlg-btn-primary" : variant === "danger" ? " tlg-btn-danger" : "");
 	    return '<button type="button" class="' + cls + '" id="' + id + '"' + (extraStyle ? ' style="' + extraStyle + '"' : '') + '>' + escHtml(text) + '</button>';
 	}
 	function tlgActionsRow(buttonsHtml) {
@@ -2846,7 +2846,6 @@
             toast("世界已创建: " + name);
         });
     };
-
 	// ══════════════════════════════════════
 	// 模型列表获取
 	// ══════════════════════════════════════
@@ -2901,25 +2900,21 @@
         if (document.getElementById("tlg-panel")) return;
         var panel = document.createElement("div");
         panel.id = "tlg-panel";
+        panel.style.cssText = "position:fixed;top:0;right:0;width:420px;height:100dvh;background:#000000;border-left:1px solid #1a1a26;z-index:2147483646;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif;font-size:13px;color:#e0e0e8;overflow:hidden;transform:translateX(100%);transition:transform 0.25s ease;";
         document.body.appendChild(panel);
         var s = globalApi;
 
         var summaryTabHtml =
             '<div class="tlg-view" data-tab="summary">' +
             '<div class="tlg-scroll-panel">' +
-            '<div style="font-size:15px;font-weight:600;color:#ffffff;margin-bottom:12px;">因果操作台</div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">总结切片</div>' +
+            '<div style="font-size:15px;font-weight:600;color:#ffffff;margin-bottom:12px;">因果档案</div>' +
+            '<div class="tlg-section"><div class="tlg-section-title">记录仪</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动切片</span><div class="tlg-toggle ' + (s.autoMode ? "on" : "") + '" id="tlg-auto-toggle"></div></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">每 <input class="tlg-input" id="tlg-auto-interval" type="number" min="1" value="' + (s.autoInterval || 10) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合切片一次</label></div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">跳转前自动总结</span><div class="tlg-toggle ' + (s.jumpSummary !== false ? "on" : "") + '" id="tlg-jump-summary-toggle"></div></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">跳跃后维持 <input class="tlg-input" id="tlg-last-n" type="number" min="1" value="' + (s.lastNMessages || 5) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">手动提取最近 <input class="tlg-input" id="tlg-manual-count" type="number" min="1" value="' + (s.manualCount || 20) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 步</label></div>' +
             '<button type="button" class="tlg-btn tlg-btn-primary" id="tlg-summary-run" style="margin-top:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">▶ 立即执行切片</button></div>' +
-            '<div class="tlg-section"><div class="tlg-section-title">摘要铭刻</div>' +
-            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动铭刻(每回合触发)</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
-            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">铭刻缓冲 <input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 秒</label></div>' +
-            '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">补全批次 <input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 回合/批</label></div>' +
-            '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button></div>' +
             '<div class="tlg-section"><div class="tlg-section-title">自动浓缩</div>' +
             '<div class="tlg-row"><span class="tlg-label" style="margin:0">档案满时自动浓缩</span><div class="tlg-toggle ' + (s.autoCompress ? "on" : "") + '" id="tlg-auto-compress-toggle"></div></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">档案上限 <input class="tlg-input" id="tlg-summary-max" type="number" min="10" value="' + (s.summaryMaxCount || 100) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条 · 每批浓缩 <input class="tlg-input" id="tlg-compress-batch" type="number" min="2" value="' + (s.compressBatchSize || 10) + '" style="width:60px;display:inline-block;padding:4px 6px;margin:0 4px;font-size:14px"> 条</label></div></div>' +
@@ -2954,6 +2949,10 @@
             '</div>' +
             // 摘要 API
             '<div class="tlg-section"><div class="tlg-section-title">摘要引擎</div>' +
+            '<div class="tlg-row"><span class="tlg-label" style="margin:0">自动模式(每回合触发)</span><div class="tlg-toggle ' + (s.digestAutoMode !== false ? "on" : "") + '" id="tlg-digest-auto-toggle"></div></div>' +
+            '<label class="tlg-label">补全批次大小(每批覆盖N回合)</label><input class="tlg-input" id="tlg-digest-batch-size" type="number" min="1" max="20" value="' + (s.digestBatchSize || 1) + '" style="width:80px;margin-bottom:8px" />' +
+            '<label class="tlg-label">铭刻缓冲(回复后等待N秒再执行,0=立即)</label><input class="tlg-input" id="tlg-digest-grace" type="number" min="0" max="120" value="' + (s.digestGraceSeconds || 15) + '" style="width:80px;margin-bottom:8px" />' +
+            '<button type="button" class="tlg-btn" id="tlg-digest-catchup-btn" style="margin-top:6px;margin-bottom:10px;writing-mode:horizontal-tb;white-space:nowrap;width:auto;height:auto;">∮ 补全历史摘要</button>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">API 地址</label><input class="tlg-input" id="tlg-digest-url" value="' + escHtml(s.digestUrl || "") + '" style="flex:1;margin-bottom:0" /></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">密钥</label><input class="tlg-input" id="tlg-digest-key" type="password" value="' + escHtml(s.digestKey || "") + '" style="flex:1;margin-bottom:0" /></div>' +
             '<div class="tlg-row"><label class="tlg-label" style="margin:0;flex:1">核心</label><select class="tlg-select" id="tlg-digest-model-select" style="flex:1;margin-bottom:0"></select></div>' +
@@ -2973,7 +2972,7 @@
             '<div class="tlg-tabs" style="display:flex;border-bottom:1px solid #2a2a3a;flex-shrink:0;overflow-x:auto;">' +
             '<div class="tlg-tab active" data-tab="tree" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">命运分支线</div>' +
             '<div class="tlg-tab" data-tab="archive" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">观测坐标</div>' +
-            '<div class="tlg-tab" data-tab="summary" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">因果操作台</div>' +
+            '<div class="tlg-tab" data-tab="summary" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">因果档案</div>' +
             '<div class="tlg-tab" data-tab="vault" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">观测档案库</div>' +
             '<div class="tlg-tab" data-tab="worldarchive" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">世界档案</div>' +
             '<div class="tlg-tab" data-tab="worlds" style="padding:10px 14px;font-size:12px;cursor:pointer;white-space:nowrap;color:#c0c0c8;border-bottom:2px solid transparent;">诸世界</div>' +
@@ -3043,9 +3042,6 @@
         populateVectorModelSelect();
         populateRerankModelSelect();
         populateDigestModelSelect();
-        // 隐藏摘要引擎的操作控件(自动模式/批次/缓冲/补全按钮已移至因果操作台,这里是引擎核心)
-        var digestEngineControls = document.querySelectorAll("#tlg-digest-auto-toggle, #tlg-digest-batch-size, #tlg-digest-grace, #tlg-digest-catchup-btn");
-        digestEngineControls.forEach(function(el) { if (el) el.style.display = "none"; });
     }
 
     function bindPanelEvents() {
@@ -3277,7 +3273,8 @@
         var panel = document.getElementById("tlg-panel");
         if (!panel) { ensurePanelBuilt(); panel = document.getElementById("tlg-panel"); }
         if (!panel) return;
-        panel.style.display = "flex";
+        panel.style.transform = "translateX(0px)";
+        document.body.style.overflow = "hidden";
         renderCanvas();
         refreshArchive();
         refreshSummary();
@@ -3287,7 +3284,7 @@
 
     function closePanel() {
         var panel = document.getElementById("tlg-panel");
-        if (panel) panel.style.display = "none";
+        if (panel) { panel.style.display = "none"; document.body.style.overflow = ""; }
     }
 
     function switchTab(tabName) {
@@ -3474,3 +3471,4 @@
 
     boot();
 })();
+
